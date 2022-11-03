@@ -6,7 +6,7 @@ from transformers import AutoConfig, AutoModel
 from utils.torch import load_pretrained_weights
 
 
-class NERTransformer(nn.Module):
+class OttoTransformer(nn.Module):
     def __init__(
         self,
         model,
@@ -17,8 +17,8 @@ class NERTransformer(nn.Module):
         k=5,
         drop_p=0.1,
         multi_sample_dropout=False,
-        use_squad_weights=False,
         num_classes=3,
+        n_ids=2000000,
         config_file=None,
         pretrained=True,
         pretrained_weights=None,
@@ -26,8 +26,10 @@ class NERTransformer(nn.Module):
     ):
         super().__init__()
         self.name = model
+        self.n_ids = n_ids
         self.use_lstm = use_lstm
         self.nb_layers = nb_layers
+        self.num_classes = num_classes
         self.multi_sample_dropout = multi_sample_dropout
 
         self.pad_idx = 1 if "roberta" in self.name else 0
@@ -47,6 +49,8 @@ class NERTransformer(nn.Module):
             self.transformer = AutoModel.from_pretrained(model, config=config)
         else:
             self.transformer = AutoModel.from_config(config)
+            
+        self.transformer = update_embeds(self.transformer, n_ids, num_classes)
 
         self.nb_features = config.hidden_size
         if nb_ft is None:
@@ -70,11 +74,11 @@ class NERTransformer(nn.Module):
                 nn.Dropout(drop_p),
             )
             self.logits = nn.Sequential(
-                nn.Linear(nb_ft, num_classes),
+                nn.Linear(nb_ft, num_classes * n_ids),
             )
         else:
             self.cnn = nn.Identity()
-            self.logits = nn.Linear(in_fts, num_classes)
+            self.logits = nn.Linear(in_fts, num_classes * n_ids)
 
         self.high_dropout = nn.Dropout(p=0.5)
 
@@ -113,7 +117,7 @@ class NERTransformer(nn.Module):
                 torch.stack(
                     [
                         self.logits(
-                            self.cnn(self.high_dropout(features).transpose(1, 2)).transpose(1, 2).mean(1)
+                            self.cnn(self.high_dropout(features).transpose(1, 2)).transpose(1, 2)[:, 0]  # .mean(1)
                         )
                         for _ in range(5)
                     ],
@@ -123,7 +127,28 @@ class NERTransformer(nn.Module):
             )
         else:
             logits = self.logits(
-                self.cnn(features.transpose(1, 2)).transpose(1, 2).mean(1)
+                self.cnn(features.transpose(1, 2)).transpose(1, 2)[:, 0]  # .mean(1)
             )
 
-        return logits
+        return logits.view(-1, self.n_ids, self.num_classes)
+
+    
+def update_embeds(model, n_words, n_token_type, verbose=1):
+    if verbose:
+        print(f'Using {n_words} tokens for word_embeddings')
+        print(f'Using {n_token_type} tokens for token_type_embeddings')
+
+    model.config.type_vocab_size = n_token_type
+
+    embedding_dim = model.embeddings.word_embeddings.embedding_dim
+    padding_idx =  model.embeddings.word_embeddings.padding_idx
+
+    model.embeddings.word_embeddings = nn.Embedding(
+        n_words, embedding_dim=embedding_dim, padding_idx=padding_idx
+    )
+
+    model.embeddings.token_type_embeddings = nn.Embedding(
+        n_token_type, embedding_dim=embedding_dim
+    )
+    
+    return model

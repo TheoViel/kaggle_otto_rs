@@ -3,9 +3,10 @@ import numpy as np
 from scipy.stats import poisson
 from torch.utils.data import Dataset
 
-from params import N_IDS
+from params import N_IDS, NUM_CLASSES
 
-class OttoTrainDataset(Dataset):
+
+class OttoDataset(Dataset):
     def __init__(self, df, max_len=100, max_trunc=20, train=True, test=False):
         self.df = df
         self.test = test
