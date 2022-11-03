@@ -7,3 +7,4 @@ tqdm==4.63.0
 transformers==4.17.0
 torchcontrib==0.0.2
 seaborn
+ipywidgets==8.0.2
