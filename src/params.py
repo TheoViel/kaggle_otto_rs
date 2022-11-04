@@ -11,7 +11,8 @@ LOG_PATH = "/workspace/logs/"
 
 NUM_WORKERS = 4
 
-N_IDS = 1855605
+N_IDS = 1855610
+CLS_TOKEN = 1855609
 
 TRAIN_DATA_PATH = DATA_PATH + "processed/"
 TEST_DATA_PATH = DATA_PATH + "processed_test/"

@@ -3,7 +3,7 @@ import numpy as np
 from scipy.stats import poisson
 from torch.utils.data import Dataset
 
-from params import N_IDS, NUM_CLASSES
+from params import N_IDS, NUM_CLASSES, CLASSES, CLS_TOKEN
 
 
 class OttoDataset(Dataset):
@@ -20,6 +20,8 @@ class OttoDataset(Dataset):
         self.ps[0] *= 1.5  # More 1s
         self.ps[9:] += 0.01  # Higher tail
 
+        self.tgt_dict = {}
+
     def pad(self, x):
         length = x.shape[0]
         if length > self.max_len:
@@ -28,8 +30,12 @@ class OttoDataset(Dataset):
             padded = np.zeros([self.max_len] + list(x.shape[1:]))
             padded[:length] = x
             return padded
-        
-    def truncate(self, x):
+    
+    @staticmethod
+    def add_cls_token(x):
+        return np.concatenate([[CLS_TOKEN], x])
+
+    def truncate(self, x, idx):
         if len(x) <= self.max_trunc:
             range_ = np.arange(1, len(x))
         elif len(x) > self.max_len:
@@ -41,24 +47,40 @@ class OttoDataset(Dataset):
         ps /= ps.sum()
 
         if not self.train:  # deterministic
-            np.random.seed(2020)
+            np.random.seed(idx)
         trunc = np.random.choice(range_, p=ps)
 
         return x[:trunc], x[trunc:]
-        
-    @staticmethod
-    def get_target(x):
+
+    def get_target(x, idx):
         y = np.zeros((N_IDS, NUM_CLASSES), dtype=np.uint8)
-        y[x[:, 0], x[:, 2]] = 1
-        return y.copy()
+
+        y_dict = {'clicks': None, 'carts': [], 'orders': []}
+
+        first = True
+        for id_, _, c in x:
+            if c > 1:
+                y[id_, c] = 1
+                y_dict[CLASSES[c]].append(id_)
+            else:  # first clic only
+                if first:
+                    y[id_, 0] = 1
+                    y_dict["clicks"] = id_
+                    first = False
+
+        if not self.train and not self.val:
+            self.tgt_dict[idx] = y_dict
+
+        return y
 
     def __getitem__(self, idx):
         x = np.load(self.paths[idx])
 
         if not self.test:
-            x, x_target = self.truncate(x)
-            y = self.get_target(x_target)
+            x, x_target = self.truncate(x, idx)
+            y = self.get_target(x_target, idx)
 
+        x = self.add_cls_token(x)
         x = self.pad(x)
 
         return {
