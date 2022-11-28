@@ -9,3 +9,4 @@ torchcontrib==0.0.2
 seaborn
 ipywidgets==8.0.2
 beartype
+merlin-dataloader==0.0.2
