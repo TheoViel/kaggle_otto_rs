@@ -1,4 +1,4 @@
-# import numpy as np
+import numpy as np
 # from sklearn.metrics import *
 
 
@@ -53,3 +53,19 @@ def recall(predictions, labels, k=20):
     )
 
     return recalls  # , total_hits, total_events
+
+
+def get_coverage(preds, gts):
+    n_preds = 0
+    n_gts = 0
+    n_found = 0
+
+    for i in range(len(preds)):
+        n_preds += len(preds[i])
+        if not isinstance(gts[i], (list, np.ndarray)):
+            continue
+
+        n_gts += min(20, len(gts[i]))
+        n_found += min(20, len(set(list(gts[i])).intersection(set(list(preds[i])))))
+
+    return n_preds, n_gts, n_found

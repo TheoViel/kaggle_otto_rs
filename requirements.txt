@@ -10,3 +10,6 @@ seaborn
 ipywidgets==8.0.2
 beartype
 merlin-dataloader==0.0.2
+numerize
+nb_black
+pandarallel==1.6.3
