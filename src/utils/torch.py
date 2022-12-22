@@ -88,12 +88,16 @@ def load_pretrained_weights(model, filename, verbose=1, cp_folder=""):
     weights = torch.load(os.path.join(cp_folder, filename))
 
     # Rename if MLM pretraining
-    weights = {re.sub(f"{k.split('.')[0]}.", 'transformer.', k): v for k, v in weights.items()}
+    weights = {
+        re.sub(f"{k.split('.')[0]}.", "transformer.", k): v for k, v in weights.items()
+    }
 
     errors = model.load_state_dict(weights, strict=False)
 
     if len(errors.unexpected_keys) > 10:
-        warnings.warn(f"Too many unexpected_keys keys : \n {errors.unexpected_keys}", UserWarning)
+        warnings.warn(
+            f"Too many unexpected_keys keys : \n {errors.unexpected_keys}", UserWarning
+        )
 
 
 def count_parameters(model, all=False):
@@ -135,7 +139,11 @@ def get_grad_norm(model):
     """
     return torch.norm(
         torch.stack(
-            [torch.norm(p.grad.detach(), 2) for p in model.parameters() if p.grad is not None]
-            ),
-        2
+            [
+                torch.norm(p.grad.detach(), 2)
+                for p in model.parameters()
+                if p.grad is not None
+            ]
+        ),
+        2,
     )

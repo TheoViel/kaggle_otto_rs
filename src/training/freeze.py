@@ -41,8 +41,8 @@ def freeze_batchnorm(model):
     """
     for module in model.modules():
         if isinstance(module, torch.nn.BatchNorm2d):
-            if hasattr(module, 'weight'):
+            if hasattr(module, "weight"):
                 module.weight.requires_grad_(False)
-            if hasattr(module, 'bias'):
+            if hasattr(module, "bias"):
                 module.bias.requires_grad_(False)
             module.eval()

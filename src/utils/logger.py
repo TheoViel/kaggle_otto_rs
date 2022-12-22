@@ -12,6 +12,7 @@ class Config:
     """
     Placeholder to load a config from a saved json
     """
+
     def __init__(self, dic):
         for k, v in dic.items():
             setattr(self, k, v)
@@ -21,6 +22,7 @@ class Logger(object):
     """
     Simple logger that saves what is printed in a file
     """
+
     def __init__(self, *files):
         self.files = files
 
@@ -91,7 +93,7 @@ def save_config(config, path):
     dic = config.__dict__.copy()
     del (dic["__doc__"], dic["__module__"], dic["__dict__"], dic["__weakref__"])
 
-    if not path.endswith('.json'):
+    if not path.endswith(".json"):
         path += ".json"
 
     with open(path, "w") as f:

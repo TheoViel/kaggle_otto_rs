@@ -25,7 +25,10 @@ def padded_mean(arrays, weights=None):
             arrays[i] = arrays[i][:, None]
 
     max_len = np.max([x.shape[0] for x in arrays])
-    arrays = [np.concatenate([x, np.zeros((max_len - x.shape[0], x.shape[1]))]) for x in arrays]
+    arrays = [
+        np.concatenate([x, np.zeros((max_len - x.shape[0], x.shape[1]))])
+        for x in arrays
+    ]
     return np.average(arrays, axis=0, weights=weights)
 
 
@@ -36,7 +39,8 @@ def blend(preds, weights=None):
             if pred[0].shape[1] > 1:
                 preds[i] = [p[:, 1:].sum(-1, keepdims=True) for p in pred]
     return [
-        padded_mean([preds[i][j] for i in range(len(preds))], weights) for j in range(len(preds[0]))
+        padded_mean([preds[i][j] for i in range(len(preds))], weights)
+        for j in range(len(preds[0]))
     ]
 
 
@@ -45,17 +49,19 @@ def to_array(preds, max_len=1000):
     for i in range(len(preds)):
         length = min(max_len, len(preds[i].flatten()))
         array[i, :length] = preds[i].flatten()[:length]
-        
+
     return array
 
 
 def inference_val(df, exp_folder, save=False, cfg_folder=None):
-    config = Config(json.load(open(exp_folder + "config.json", 'r')))
+    config = Config(json.load(open(exp_folder + "config.json", "r")))
 
     folds = pd.read_csv(exp_folder + "folds.csv")
     df = df.merge(folds, how="left", on=["case_num", "pn_num"])
 
-    cfg_folder = None if cfg_folder is None else cfg_folder + config.name.split('/')[-1] + "/"
+    cfg_folder = (
+        None if cfg_folder is None else cfg_folder + config.name.split("/")[-1] + "/"
+    )
     model_config_file = None if cfg_folder is None else cfg_folder + "config.pth"
     tokenizer_folder = None if cfg_folder is None else cfg_folder + "tokenizers/"
 
@@ -79,7 +85,7 @@ def inference_val(df, exp_folder, save=False, cfg_folder=None):
         multi_sample_dropout=config.multi_sample_dropout,
         num_classes=config.num_classes,
         config_file=model_config_file,
-        pretrained=False
+        pretrained=False,
     ).cuda()
     model.zero_grad()
 
@@ -88,9 +94,11 @@ def inference_val(df, exp_folder, save=False, cfg_folder=None):
 
     pred_oof = [[] for i in range(len(df))]
     for fold, weight in enumerate(weights):
-        assert weight.endswith(f'_{fold}.pt'), f"Weights name {weight} does not match fold {fold}"
+        assert weight.endswith(
+            f"_{fold}.pt"
+        ), f"Weights name {weight} does not match fold {fold}"
 
-        val_idx = list(df[df['fold'] == fold].index)
+        val_idx = list(df[df["fold"] == fold].index)
         df_val = df.iloc[val_idx].copy().reset_index(drop=True)
 
         dataset = PatientNoteDataset(
@@ -105,15 +113,17 @@ def inference_val(df, exp_folder, save=False, cfg_folder=None):
             model,
             dataset,
             data_config=config.data_config,
-            activation=config.loss_config["activation"]
+            activation=config.loss_config["activation"],
         )
         for i, val_i in enumerate(val_idx):
             pred_oof[val_i] = pred_val[i]
 
-    df['preds'] = preds_to_labels(pred_oof)
-    df['preds_pp'] = df.apply(lambda x: post_process_spaces(x['preds'], x['clean_text']), 1)
+    df["preds"] = preds_to_labels(pred_oof)
+    df["preds_pp"] = df.apply(
+        lambda x: post_process_spaces(x["preds"], x["clean_text"]), 1
+    )
 
-    score = micro_f1(df['preds_pp'], df['target'])
+    score = micro_f1(df["preds_pp"], df["target"])
     print(f"\n\n -> CV score : {score:.4f}")
 
     if save:
@@ -123,10 +133,12 @@ def inference_val(df, exp_folder, save=False, cfg_folder=None):
     return pred_oof
 
 
-def inference_test(exp_folders, data_folder="", cfg_folder=None, debug=False, excluded_weights=None):
+def inference_test(
+    exp_folders, data_folder="", cfg_folder=None, debug=False, excluded_weights=None
+):
     preds = []
     for exp_id, exp_folder in enumerate(exp_folders):
-        config = Config(json.load(open(exp_folder + "config.json", 'r')))
+        config = Config(json.load(open(exp_folder + "config.json", "r")))
         config.max_len = 512
 
         if debug:
@@ -135,13 +147,16 @@ def inference_test(exp_folders, data_folder="", cfg_folder=None, debug=False, ex
             df = load_and_prepare_test(root=data_folder, lower=config.lower)
 
         if cfg_folder is not None:
-            model_config_file = cfg_folder + config.name.split('/')[-1] + "/config.pth"
-            tokenizer_folder = cfg_folder + config.name.split('/')[-1] + "/tokenizers/"
+            model_config_file = cfg_folder + config.name.split("/")[-1] + "/config.pth"
+            tokenizer_folder = cfg_folder + config.name.split("/")[-1] + "/tokenizers/"
         else:
             model_config_file, tokenizer_folder = None, None
 
         tokenizer = get_tokenizer(
-            config.name, precompute=config.precompute_tokens, df=df, folder=tokenizer_folder
+            config.name,
+            precompute=config.precompute_tokens,
+            df=df,
+            folder=tokenizer_folder,
         )
 
         dataset = PatientNoteDataset(
@@ -166,24 +181,24 @@ def inference_test(exp_folders, data_folder="", cfg_folder=None, debug=False, ex
             multi_sample_dropout=config.multi_sample_dropout,
             num_classes=config.num_classes,
             config_file=model_config_file,
-            pretrained=False
+            pretrained=False,
         ).cuda()
         model.zero_grad()
 
         weights = sorted(glob.glob(exp_folder + "*.pt"))
         for fold, weight in enumerate(weights):
-            
+
             if excluded_weights is not None:
                 if fold in excluded_weights[exp_id]:
                     continue
-            
+
             model = load_model_weights(model, weight)
 
             pred = predict(
                 model,
                 dataset,
                 data_config=config.data_config,
-                activation=config.loss_config["activation"]
+                activation=config.loss_config["activation"],
             )
             preds.append(pred)
 
@@ -196,23 +211,26 @@ def inference_test(exp_folders, data_folder="", cfg_folder=None, debug=False, ex
 def inference_pl(df, exp_folders, fold=0, cfg_folder=None):
     preds = []
     for exp_folder in exp_folders:
-        config = Config(json.load(open(exp_folder + "config.json", 'r')))
+        config = Config(json.load(open(exp_folder + "config.json", "r")))
 
         if config.lower:
-            df['feature_text'] = df['ft_ref'].apply(lambda x: x.lower())
-            df['clean_text'] = df['text_ref'].apply(lambda x: x.lower())
+            df["feature_text"] = df["ft_ref"].apply(lambda x: x.lower())
+            df["clean_text"] = df["text_ref"].apply(lambda x: x.lower())
         else:
-            df['feature_text'] = df['ft_ref']
-            df['clean_text'] = df['text_ref']
+            df["feature_text"] = df["ft_ref"]
+            df["clean_text"] = df["text_ref"]
 
         if cfg_folder is not None:
-            model_config_file = cfg_folder + config.name.split('/')[-1] + "/config.pth"
-            tokenizer_folder = cfg_folder + config.name.split('/')[-1] + "/tokenizers/"
+            model_config_file = cfg_folder + config.name.split("/")[-1] + "/config.pth"
+            tokenizer_folder = cfg_folder + config.name.split("/")[-1] + "/tokenizers/"
         else:
             model_config_file, tokenizer_folder = None, None
 
         tokenizer = get_tokenizer(
-            config.name, precompute=config.precompute_tokens, df=df, folder=tokenizer_folder
+            config.name,
+            precompute=config.precompute_tokens,
+            df=df,
+            folder=tokenizer_folder,
         )
 
         dataset = PatientNoteDataset(
@@ -231,7 +249,7 @@ def inference_pl(df, exp_folders, fold=0, cfg_folder=None):
             multi_sample_dropout=config.multi_sample_dropout,
             num_classes=config.num_classes,
             config_file=model_config_file,
-            pretrained=False
+            pretrained=False,
         ).cuda()
         model.zero_grad()
 
@@ -243,7 +261,7 @@ def inference_pl(df, exp_folders, fold=0, cfg_folder=None):
                 model,
                 dataset,
                 data_config=config.data_config,
-                activation=config.loss_config["activation"]
+                activation=config.loss_config["activation"],
             )
             preds.append(pred)
 

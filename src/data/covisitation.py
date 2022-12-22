@@ -108,4 +108,6 @@ def compute_covisitation_matrix(
         matrix.to_pandas().to_parquet(save_path)
 
     numba.cuda.current_context().deallocations.clear()
+
+
 #     return matrix

@@ -22,7 +22,7 @@ def validate(
     val_bs=32,
     verbose=0,
     device="cuda",
-    subsample=True
+    subsample=True,
 ):
     """
     Validation function.

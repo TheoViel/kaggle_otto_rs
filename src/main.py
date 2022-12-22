@@ -75,11 +75,12 @@ MAX_LENS = {
     "microsoft/deberta-v3-large": 512,
 }
 
+
 class Config:
     # General
     seed = 2222
     device = "cuda"
-    
+
     # Splits
     k = 4
     random_state = 2222
@@ -89,7 +90,7 @@ class Config:
     # Architecture
     name = "microsoft/codebert-base"
 
-    pretrained_weights = None 
+    pretrained_weights = None
 
     no_dropout = False
     use_conv = False
@@ -106,10 +107,10 @@ class Config:
     max_len = 512
     lower = True
 
-#     extra_data_path = OUT_PATH + "pl_case5/"
+    #     extra_data_path = OUT_PATH + "pl_case5/"
     extra_data_path = None  # OUT_PATH + "pl_6/df_pl.csv"
 
-    # Training    
+    # Training
     loss_config = {
         "name": "mse",  # dice, ce, bce
         "smoothing": 0,  # 0.01
@@ -131,7 +132,7 @@ class Config:
         "warmup_prop": 0.1,
         "weight_decay": 1,
         "betas": (0.5, 0.99),
-        "max_grad_norm": 1.,
+        "max_grad_norm": 1.0,
         # AWP
         "use_awp": False,
         "awp_start_step": 1000,
@@ -153,25 +154,25 @@ class Config:
     verbose = 1
     verbose_eval = 1000
 
-    
+
 if __name__ == "__main__":
     warnings.simplefilter("ignore", UserWarning)
 
-    print('Starting')
+    print("Starting")
     args = parse_args()
-    
-#     print(torch.cuda.device_count())
+
+    #     print(torch.cuda.device_count())
     fold = args.fold
     print("Using GPU ", fold)
 
-    os.environ['CUDA_VISIBLE_DEVICES'] = str(fold + args.gpu_offset)
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(fold + args.gpu_offset)
     assert torch.cuda.device_count() == 1
 
     log_folder = args.log_folder
     create_logger(directory=log_folder, name=f"logs_{fold}.txt")
-    
+
     print("Device :", torch.cuda.get_device_name(0), "\n")
-    
+
     # Data
     df = load_and_prepare(DATA_PATH)
 
@@ -179,25 +180,26 @@ if __name__ == "__main__":
 
     config = Config
     config.selected_folds = [fold]
-    
+
     if args.model:
         config.name = args.model
-        
+
     if args.epochs:
         config.epochs = args.epochs
 
     if args.lr:
         config.optimizer_config["lr_transfo"] = args.epochs
 
-    print(f'- Model  {config.name}')
-    print(f'- Epochs {config.epochs}')
+    print(f"- Model  {config.name}")
+    print(f"- Epochs {config.epochs}")
     print(f'- LR {config.optimizer_config["lr_transfo"]}')
 
     save_config(config, log_folder + "config.json")
-    
-    print('\n -> Training\n')
+
+    print("\n -> Training\n")
 
     from training.main import k_fold
+
     k_fold(config, df, df_test=df_test, log_folder=log_folder)
 
-    print('\nDone !')
+    print("\nDone !")

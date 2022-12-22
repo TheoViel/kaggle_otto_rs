@@ -39,7 +39,11 @@ from transformers.trainer_pt_utils import (
     nested_numpify,
     nested_truncate,
 )
-from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR, EvalLoopOutput, SchedulerType
+from transformers.trainer_utils import (
+    PREFIX_CHECKPOINT_DIR,
+    EvalLoopOutput,
+    SchedulerType,
+)
 from transformers.utils import logging
 
 from merlin_standard_lib import Schema
@@ -47,6 +51,7 @@ from merlin_standard_lib import Schema
 from transformers4rec.config.trainer import T4RecTrainingArguments
 from transformers4rec.torch.model.base import Model
 from transformers4rec.torch.utils.data_utils import T4RecDataLoader
+
 # from transformers4rec.torch.trainer import *
 
 logger = logging.get_logger(__name__)
@@ -143,7 +148,9 @@ class Trainer(BaseTrainer):
         if self.train_dataloader is not None:
             return self.train_dataloader
 
-        assert self.schema is not None, "schema is required to generate Train Dataloader"
+        assert (
+            self.schema is not None
+        ), "schema is required to generate Train Dataloader"
         return T4RecDataLoader.parse(self.args.data_loader_engine).from_schema(
             self.schema,
             self.train_dataset_or_path,
@@ -226,7 +233,9 @@ class Trainer(BaseTrainer):
         """
         self.lr_scheduler = None
 
-    def create_scheduler(self, num_training_steps: int, optimizer: torch.optim.Optimizer = None):
+    def create_scheduler(
+        self, num_training_steps: int, optimizer: torch.optim.Optimizer = None
+    ):
         # flexibility in scheduler with num_cycles as hyperparams
         if self.lr_scheduler is None:
             self.lr_scheduler = self.get_scheduler(
@@ -276,14 +285,18 @@ class Trainer(BaseTrainer):
 
         # All other schedulers require `num_warmup_steps`
         if num_warmup_steps is None:
-            raise ValueError(f"{name} requires `num_warmup_steps`, please provide that argument.")
+            raise ValueError(
+                f"{name} requires `num_warmup_steps`, please provide that argument."
+            )
 
         if name == SchedulerType.CONSTANT_WITH_WARMUP:
             return schedule_func(optimizer, num_warmup_steps=num_warmup_steps)
 
         # All other schedulers require `num_training_steps`
         if num_training_steps is None:
-            raise ValueError(f"{name} requires `num_training_steps`, please provide that argument.")
+            raise ValueError(
+                f"{name} requires `num_training_steps`, please provide that argument."
+            )
 
         if "num_cycles" in inspect.signature(schedule_func).parameters:
             return schedule_func(
@@ -294,7 +307,9 @@ class Trainer(BaseTrainer):
             )
 
         return schedule_func(
-            optimizer, num_warmup_steps=num_warmup_steps, num_training_steps=num_training_steps
+            optimizer,
+            num_warmup_steps=num_warmup_steps,
+            num_training_steps=num_training_steps,
         )
 
     def prediction_step(
@@ -320,7 +335,9 @@ class Trainer(BaseTrainer):
         with torch.no_grad():
             if self.use_amp:
                 with autocast():
-                    outputs = model(inputs, training=False, ignore_masking=ignore_masking)
+                    outputs = model(
+                        inputs, training=False, ignore_masking=ignore_masking
+                    )
             else:
                 outputs = model(inputs, training=False, ignore_masking=ignore_masking)
 
@@ -448,9 +465,9 @@ class Trainer(BaseTrainer):
                 ignore_keys=ignore_keys,
                 ignore_masking=ignore_masking,
             )
-            
-#             print(labels)
-#             print(preds)
+
+            #             print(labels)
+            #             print(preds)
 
             # Updates metrics
             # TODO: compute metrics each N eval_steps to speedup evaluation
@@ -458,14 +475,20 @@ class Trainer(BaseTrainer):
             if self.compute_metrics:
                 if step % self.args.compute_metrics_each_n_steps == 0:
                     metrics_results_detailed = model.calculate_metrics(
-                        preds, labels, mode=metric_key_prefix, forward=False, call_body=False
+                        preds,
+                        labels,
+                        mode=metric_key_prefix,
+                        forward=False,
+                        call_body=False,
                     )
 
             # Update containers on host
             if loss is not None:
                 losses = self._nested_gather(loss.repeat(batch_size))
                 losses_host = (
-                    losses if losses_host is None else torch.cat((losses_host, losses), dim=0)
+                    losses
+                    if losses_host is None
+                    else torch.cat((losses_host, losses), dim=0)
                 )
             if labels is not None:
                 labels = self._pad_across_processes(labels)
@@ -548,12 +571,16 @@ class Trainer(BaseTrainer):
         if losses_host is not None:
             losses = nested_numpify(losses_host)
             all_losses = (
-                losses if all_losses is None else np.concatenate((all_losses, losses), axis=0)
+                losses
+                if all_losses is None
+                else np.concatenate((all_losses, losses), axis=0)
             )
         if labels_host is not None:
             labels = nested_numpify(labels_host)
             all_labels = (
-                labels if all_labels is None else nested_concat(all_labels, labels, padding_index=0)
+                labels
+                if all_labels is None
+                else nested_concat(all_labels, labels, padding_index=0)
             )
         if preds_item_ids_scores_host is not None:
             preds_item_ids_scores = nested_numpify(preds_item_ids_scores_host)
@@ -575,7 +602,9 @@ class Trainer(BaseTrainer):
         if all_losses is not None:
             all_losses = all_losses[:num_samples]
         if all_preds_item_ids_scores is not None:
-            all_preds_item_ids_scores = nested_truncate(all_preds_item_ids_scores, num_samples)
+            all_preds_item_ids_scores = nested_truncate(
+                all_preds_item_ids_scores, num_samples
+            )
         if all_labels is not None:
             all_labels = nested_truncate(all_labels, num_samples)
 
@@ -652,7 +681,9 @@ class Trainer(BaseTrainer):
             except ImportError:
                 raise ImportError("cloudpickle is required to load model class")
             logger.info("Loading model class")
-            model = cloudpickle.load(open(os.path.join(checkpoint_path, "model_class.pkl"), "rb"))
+            model = cloudpickle.load(
+                open(os.path.join(checkpoint_path, "model_class.pkl"), "rb")
+            )
 
         self.model = HFWrapper(model)
         logger.info("Loading weights of previously trained model")
@@ -670,7 +701,9 @@ class Trainer(BaseTrainer):
         torch.cuda.random.set_rng_state_all(checkpoint_rng_state["cuda"])
         # Restoring AMP scaler
         if self.use_amp:
-            self.scaler.load_state_dict(torch.load(os.path.join(checkpoint_path, "scaler.pt")))
+            self.scaler.load_state_dict(
+                torch.load(os.path.join(checkpoint_path, "scaler.pt"))
+            )
 
     @property
     def log_predictions_callback(self) -> Callable:
@@ -739,7 +772,10 @@ class Trainer(BaseTrainer):
     def log(self, logs: Dict[str, float]) -> None:
         # Ensuring that eval metrics are prefixed as "eval_" so that the HF integration loggers
         # do not prefix metrics names with 'train/' (as 'train/' is always added when not eval)
-        logs = {re.sub("^eval/", "eval_", k).replace("train/", ""): v for k, v in logs.items()}
+        logs = {
+            re.sub("^eval/", "eval_", k).replace("train/", ""): v
+            for k, v in logs.items()
+        }
 
         if not self.incremental_logging:
             super().log(logs)
@@ -757,14 +793,18 @@ class Trainer(BaseTrainer):
 
             output = {**logs, **{"step": state_copy.global_step}}
             self.state.log_history.append(output)
-            self.control = self.callback_handler.on_log(self.args, state_copy, self.control, logs)
+            self.control = self.callback_handler.on_log(
+                self.args, state_copy, self.control, logs
+            )
 
 
 def process_metrics(metrics, prefix="", to_cpu=True):
     metrics_proc = {}
     for root_key, root_value in metrics.items():
         if isinstance(root_value, dict):
-            flattened_metrics = process_metrics(root_value, prefix=prefix, to_cpu=to_cpu)
+            flattened_metrics = process_metrics(
+                root_value, prefix=prefix, to_cpu=to_cpu
+            )
             metrics_proc = {**metrics_proc, **flattened_metrics}
         else:
             value = root_value.cpu().numpy().item() if to_cpu else root_value

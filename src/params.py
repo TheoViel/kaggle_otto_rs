@@ -4,7 +4,7 @@ K = 5
 DATA_PATH = "../input/"
 OUT_PATH = "../output/"
 
-CLASSES = ['clicks', 'carts', 'orders']
+CLASSES = ["clicks", "carts", "orders"]
 WEIGHTS = [0.1, 0.3, 0.6]
 NUM_CLASSES = 3
 

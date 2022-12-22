@@ -13,18 +13,16 @@ from training.losses import NBMELoss
 from training.optim import custom_params, define_optimizer, trim_tensors, AWP
 
 
-def evaluate(
-    model, val_loader, data_config, loss_config, loss_fct
-):
+def evaluate(model, val_loader, data_config, loss_config, loss_fct):
     model.eval()
-    avg_val_loss = 0.
+    avg_val_loss = 0.0
     preds = []
     with torch.no_grad():
         for data in val_loader:
             y_batch = data["target"]
             ids, token_type_ids = trim_tensors(
                 [data["ids"], data["token_type_ids"]],
-                pad_token=data_config['pad_token']
+                pad_token=data_config["pad_token"],
             )
 
             y_pred = model(ids.cuda(), token_type_ids.cuda())
@@ -32,9 +30,9 @@ def evaluate(
             loss = loss_fct(y_pred.detach(), y_batch.cuda()).mean()
             avg_val_loss += loss / len(val_loader)
 
-            if loss_config['activation'] == "sigmoid":
+            if loss_config["activation"] == "sigmoid":
                 y_pred = y_pred.sigmoid()
-            elif loss_config['activation'] == "softmax":
+            elif loss_config["activation"] == "softmax":
                 y_pred = y_pred.softmax(-1)
 
             preds.append(y_pred.detach().cpu().numpy())
@@ -84,25 +82,26 @@ def fit(
     )
     optimizer.zero_grad()
 
-    if optimizer_config['use_swa']:
+    if optimizer_config["use_swa"]:
         optimizer = SWA(
             optimizer,
-            swa_start=optimizer_config['swa_start'],
-            swa_freq=optimizer_config['swa_freq']
+            swa_start=optimizer_config["swa_start"],
+            swa_freq=optimizer_config["swa_freq"],
         )
 
     loss_fct = NBMELoss(loss_config, device=device)
 
-    if optimizer_config['use_awp']:
-        awp = AWP(model,
+    if optimizer_config["use_awp"]:
+        awp = AWP(
+            model,
             optimizer,
             loss_fct,
-            adv_lr=optimizer_config['awp_lr'],
-            adv_eps=optimizer_config['awp_eps'],
-            start_step=optimizer_config['awp_start_step'],
+            adv_lr=optimizer_config["awp_lr"],
+            adv_eps=optimizer_config["awp_eps"],
+            start_step=optimizer_config["awp_start_step"],
             scaler=scaler,
         )
-    
+
     train_loader, val_loader = define_loaders(
         train_dataset,
         val_dataset,
@@ -126,7 +125,7 @@ def fit(
         for data in train_loader:
             ids, token_type_ids = trim_tensors(
                 [data["ids"], data["token_type_ids"]],
-                pad_token=data_config['pad_token']
+                pad_token=data_config["pad_token"],
             )
             y_batch = data["target"]
 
@@ -137,15 +136,20 @@ def fit(
             scaler.scale(loss).backward()
             avg_losses.append(loss.item() * acc_steps)
 
-            if optimizer_config['use_awp'] and (step % optimizer_config['awp_period']) == 0:
-                awp.attack_backward(ids, token_type_ids, y_batch, step, use_fp16=use_fp16)
+            if (
+                optimizer_config["use_awp"]
+                and (step % optimizer_config["awp_period"]) == 0
+            ):
+                awp.attack_backward(
+                    ids, token_type_ids, y_batch, step, use_fp16=use_fp16
+                )
 
             if step % acc_steps == 0:
                 scaler.unscale_(optimizer)
                 torch.nn.utils.clip_grad_norm_(
                     model.parameters(),
                     optimizer_config["max_grad_norm"],
-                    error_if_nonfinite=False
+                    error_if_nonfinite=False,
                 )
 
                 scaler.step(optimizer)
@@ -159,21 +163,31 @@ def fit(
                     param.grad = None
 
             step += 1
-            if step % (verbose_eval * acc_steps) == 0 or step - 1 == epochs * len(train_loader):
+            if step % (verbose_eval * acc_steps) == 0 or step - 1 == epochs * len(
+                train_loader
+            ):
                 if 0 <= epochs * len(train_loader) - step < verbose_eval * acc_steps:
                     continue
 
-                if step // acc_steps > optimizer_config['swa_start'] + optimizer_config['swa_freq'] and optimizer_config['use_swa']:
+                if (
+                    step // acc_steps
+                    > optimizer_config["swa_start"] + optimizer_config["swa_freq"]
+                    and optimizer_config["use_swa"]
+                ):
                     optimizer.swap_swa_sgd()
-                
+
                 preds, avg_val_loss = evaluate(
                     model, val_loader, data_config, loss_config, loss_fct
                 )
 
-                if step // acc_steps > optimizer_config['swa_start'] + optimizer_config['swa_freq'] and optimizer_config['use_swa']:
+                if (
+                    step // acc_steps
+                    > optimizer_config["swa_start"] + optimizer_config["swa_freq"]
+                    and optimizer_config["use_swa"]
+                ):
                     optimizer.swap_swa_sgd()
 
-                score= compute_metric(preds, val_dataset.targets)
+                score = compute_metric(preds, val_dataset.targets)
 
                 dt = time.time() - start_time
                 lr = scheduler.get_last_lr()[0]
@@ -188,7 +202,7 @@ def fit(
                 avg_losses = []
                 model.train()
 
-    if optimizer_config['use_swa']:
+    if optimizer_config["use_swa"]:
         optimizer.swap_swa_sgd()
 
     del (train_loader, val_loader, optimizer)

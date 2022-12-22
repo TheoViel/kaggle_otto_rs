@@ -8,12 +8,12 @@ from torch import Tensor
 from typing import Optional
 
 
-
 class SmoothCrossEntropyLoss(nn.Module):
     """
     Cross-entropy loss with label smoothing.
     """
-    def __init__(self, eps=0.):
+
+    def __init__(self, eps=0.0):
         """
         Constructor.
 

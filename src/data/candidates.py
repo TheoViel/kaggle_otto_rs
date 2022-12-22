@@ -16,7 +16,6 @@ def load_parquets(regex):
     return pd.concat(dfs).reset_index(drop=True)
 
 
-
 class Candidates(dict):
     def __missing__(self, key):
         return []
@@ -37,7 +36,6 @@ def matrix_to_candids_dict(matrix):
     return candids_dict
 
 
-
 def create_candidates(df, n_matrix=10, max_cooc=100):
     clicks_candids = matrix_to_candids_dict(
         cudf.read_parquet(f"../output/matrices/matrix_123_temporal_{n_matrix}.pqt")
@@ -54,22 +52,28 @@ def create_candidates(df, n_matrix=10, max_cooc=100):
     # df["cartbuy_candidates"] = df["aid"].map(cartbuy_candidates)
 
     df["coocurence_candidates"] = (
-        df["clicks_candidates"] +
-        df["type_weighted_candidates"]  # +
-#         df["cartbuy_candidates"]
+        df["clicks_candidates"]
+        + df["type_weighted_candidates"]  # +
+        #         df["cartbuy_candidates"]
     )
-    
+
     df.drop(["clicks_candidates", "type_weighted_candidates"], axis=1, inplace=True)
-    
-    df = df.groupby("session").agg({"aid": list, "coocurence_candidates": sum, "type": list}).reset_index()
-    
-    df['coocurence_candidates'] = df['coocurence_candidates'].parallel_apply(
-        lambda x: [aid for aid, _ in Counter(x).most_common(max_cooc)] if len(x) > 20 else x
+
+    df = (
+        df.groupby("session")
+        .agg({"aid": list, "coocurence_candidates": sum, "type": list})
+        .reset_index()
     )
-    
+
+    df["coocurence_candidates"] = df["coocurence_candidates"].parallel_apply(
+        lambda x: [aid for aid, _ in Counter(x).most_common(max_cooc)]
+        if len(x) > 20
+        else x
+    )
+
     df["candidates"] = df["aid"] + df["coocurence_candidates"]
     df["candidates"] = df["candidates"].parallel_apply(lambda x: list(set(x)))
-#     df["candidates"] = df["candidates"].parallel_apply(lambda x: list(set(x + popular)))
+    #     df["candidates"] = df["candidates"].parallel_apply(lambda x: list(set(x + popular)))
 
     df.drop(["coocurence_candidates"], axis=1, inplace=True)
 
@@ -79,20 +83,18 @@ def create_candidates(df, n_matrix=10, max_cooc=100):
 def explode(df):
     df.drop(["aid", "type"], axis=1, inplace=True)
     df = cudf.from_pandas(df)
-    
+
     df = df.explode("candidates")
     df["candidates"] = df["candidates"].astype("uint32")
     df["session"] = df["session"].astype("uint32")
-    
+
     df = df.sort_values(["session", "candidates"]).reset_index(drop=True)
-    
+
     for col in ["gt_clicks", "gt_carts", "gt_orders"]:
         df_tgt = (
-        df[["session", "candidates", col]]
-            .explode(col)
-            .reset_index(drop=True)
+            df[["session", "candidates", col]].explode(col).reset_index(drop=True)
         ).fillna(-1)
-        df_tgt["gt_orders"] = (df_tgt[col] == df_tgt["candidates"])
+        df_tgt["gt_orders"] = df_tgt[col] == df_tgt["candidates"]
         df_tgt = df_tgt.groupby(["session", "candidates"]).max().reset_index()
         df_tgt = df_tgt.sort_values(["session", "candidates"]).reset_index(drop=True)
 

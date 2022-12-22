@@ -22,7 +22,7 @@ class OttoTransformer(nn.Module):
         config_file=None,
         pretrained=True,
         pretrained_weights=None,
-        no_dropout=False
+        no_dropout=False,
     ):
         super().__init__()
         self.name = model
@@ -49,7 +49,7 @@ class OttoTransformer(nn.Module):
             self.transformer = AutoModel.from_pretrained(model, config=config)
         else:
             self.transformer = AutoModel.from_config(config)
-            
+
         self.transformer = update_embeds(self.transformer, n_ids, num_classes)
 
         self.nb_features = config.hidden_size
@@ -59,14 +59,14 @@ class OttoTransformer(nn.Module):
         in_fts = self.nb_features * self.nb_layers
 
         if use_lstm:
-            self.lstm = nn.LSTM(in_fts, self.nb_features, batch_first=True, bidirectional=True)
+            self.lstm = nn.LSTM(
+                in_fts, self.nb_features, batch_first=True, bidirectional=True
+            )
             in_fts = self.nb_features * 2
 
         if use_conv:
             self.cnn = nn.Sequential(
-                nn.Conv1d(
-                    in_fts, nb_ft * 2, kernel_size=k, padding=k // 2
-                ),
+                nn.Conv1d(in_fts, nb_ft * 2, kernel_size=k, padding=k // 2),
                 nn.Tanh(),
                 nn.Dropout(drop_p),
                 nn.Conv1d(nb_ft * 2, nb_ft, kernel_size=k, padding=k // 2),
@@ -107,7 +107,7 @@ class OttoTransformer(nn.Module):
             )[-1]
 
         hidden_states = hidden_states[::-1]
-        features = torch.cat(hidden_states[:self.nb_layers], -1)
+        features = torch.cat(hidden_states[: self.nb_layers], -1)
 
         if self.use_lstm:
             features, _ = self.lstm(features)
@@ -117,7 +117,11 @@ class OttoTransformer(nn.Module):
                 torch.stack(
                     [
                         self.logits(
-                            self.cnn(self.high_dropout(features).transpose(1, 2)).transpose(1, 2)[:, 0]  # .mean(1)
+                            self.cnn(
+                                self.high_dropout(features).transpose(1, 2)
+                            ).transpose(1, 2)[
+                                :, 0
+                            ]  # .mean(1)
                         )
                         for _ in range(5)
                     ],
@@ -132,16 +136,16 @@ class OttoTransformer(nn.Module):
 
         return logits.view(-1, self.n_ids, self.num_classes)
 
-    
+
 def update_embeds(model, n_words, n_token_type, verbose=1):
     if verbose:
-        print(f'Using {n_words} tokens for word_embeddings')
-        print(f'Using {n_token_type} tokens for token_type_embeddings')
+        print(f"Using {n_words} tokens for word_embeddings")
+        print(f"Using {n_token_type} tokens for token_type_embeddings")
 
     model.config.type_vocab_size = n_token_type
 
     embedding_dim = model.embeddings.word_embeddings.embedding_dim
-    padding_idx =  model.embeddings.word_embeddings.padding_idx
+    padding_idx = model.embeddings.word_embeddings.padding_idx
 
     model.embeddings.word_embeddings = nn.Embedding(
         n_words, embedding_dim=embedding_dim, padding_idx=padding_idx
@@ -150,5 +154,5 @@ def update_embeds(model, n_words, n_token_type, verbose=1):
     model.embeddings.token_type_embeddings = nn.Embedding(
         n_token_type, embedding_dim=embedding_dim
     )
-    
+
     return model

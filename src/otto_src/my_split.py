@@ -13,7 +13,7 @@ def val_split(train_set, output_path, days=7):
     test_file_full = output_path / "val_sessions.jsonl"
 
     train_test_split(session_chunks, train_file, test_file_full, max_ts, days)
-    
+
 
 def train_val_split(train_set, output_path, days=7, train_only=False):
     file = output_path / "sessions.jsonl"
@@ -25,7 +25,7 @@ def train_val_split(train_set, output_path, days=7, train_only=False):
         print(f"Using {days} days before {max_ts} for val split")
 
         session_chunks = pd.read_json(train_set, lines=True, chunksize=100000)
-        
+
         if file.exists():
             os.remove(file)
 
@@ -38,12 +38,12 @@ def train_val_split(train_set, output_path, days=7, train_only=False):
     print(f"Using {days} days before {max_ts} for train split")
 
     session_chunks = pd.read_json(file, lines=True, chunksize=100000)
-    
+
     if train_file.exists():
         os.remove(train_file)
-        
+
     train_test_split(session_chunks, None, train_file, max_ts, days)
-    
+
 
 def create_labels(file, output_path="", seed=42):
     sessions = pd.read_json(file, lines=True)
@@ -52,11 +52,11 @@ def create_labels(file, output_path="", seed=42):
 
     sessions_file = output_path / f"{name}_sessions_c.jsonl"
     labels_file = output_path / f"{name}_labels.jsonl"
-    
+
     if sessions_file.exists():
         os.remove(sessions_file)
     if labels_file.exists():
         os.remove(labels_file)
-    
+
     random.seed(seed)
     create_kaggle_testset(sessions, sessions_file, labels_file)

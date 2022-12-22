@@ -46,12 +46,16 @@ def train(config, tokenizer, df_train, df_val, fold, df_test=None, log_folder=No
         tokenizer,
         max_len=config.max_len,
     )
-        
+
     if config.pretrained_weights is not None:
-        if config.pretrained_weights.endswith(".pt") or config.pretrained_weights.endswith(".bin"):
+        if config.pretrained_weights.endswith(
+            ".pt"
+        ) or config.pretrained_weights.endswith(".bin"):
             pretrained_weights = config.pretrained_weights
         else:  # folder
-            pretrained_weights = glob.glob(config.pretrained_weights + f"*_{fold}.pt")[0]
+            pretrained_weights = glob.glob(config.pretrained_weights + f"*_{fold}.pt")[
+                0
+            ]
     else:
         pretrained_weights = None
 
@@ -66,7 +70,7 @@ def train(config, tokenizer, df_train, df_val, fold, df_test=None, log_folder=No
         multi_sample_dropout=config.multi_sample_dropout,
         no_dropout=config.no_dropout,
         num_classes=config.num_classes,
-        pretrained_weights=pretrained_weights
+        pretrained_weights=pretrained_weights,
     ).cuda()
     model.zero_grad()
     model.train()
@@ -107,7 +111,10 @@ def train(config, tokenizer, df_train, df_val, fold, df_test=None, log_folder=No
             max_len=config.max_len,
         )
         pred_test = predict(
-            model, test_dataset, config.data_config, activation=config.loss_config["activation"]
+            model,
+            test_dataset,
+            config.data_config,
+            activation=config.loss_config["activation"],
         )
 
     del (model, train_dataset, val_dataset)
@@ -129,9 +136,11 @@ def k_fold(config, df, df_extra=None, df_test=None, log_folder=None):
         if fold in config.selected_folds:
             print(f"\n-------------   Fold {fold + 1} / {config.k}  -------------\n")
 
-            seed_everything(int(re.sub(r'\W', '', config.name), base=36) % 2 ** 31 + fold)
-            train_idx = list(df[df['fold'] != fold].index)
-            val_idx = list(df[df['fold'] == fold].index)
+            seed_everything(
+                int(re.sub(r"\W", "", config.name), base=36) % 2**31 + fold
+            )
+            train_idx = list(df[df["fold"] != fold].index)
+            val_idx = list(df[df["fold"] == fold].index)
 
             df_train = df.iloc[train_idx].copy().reset_index(drop=True)
             df_val = df.iloc[val_idx].copy().reset_index(drop=True)
@@ -140,33 +149,43 @@ def k_fold(config, df, df_extra=None, df_test=None, log_folder=None):
                 if config.extra_data_path.endswith(".csv"):
                     extra_data_path = config.extra_data_path
                 else:
-                    extra_data_path = glob.glob(config.extra_data_path + f"*_{fold}.csv")[0]
+                    extra_data_path = glob.glob(
+                        config.extra_data_path + f"*_{fold}.csv"
+                    )[0]
                 df_extra = pd.read_csv(extra_data_path)
 
-                print(f'-> Using {len(df_extra)} extra samples from {extra_data_path}\n')
+                print(
+                    f"-> Using {len(df_extra)} extra samples from {extra_data_path}\n"
+                )
                 df_train = pd.concat([df_train, df_extra]).reset_index(drop=True)
 
             pred_val, pred_test = train(
-                config, tokenizer, df_train, df_val, fold, df_test=df_test, log_folder=log_folder
+                config,
+                tokenizer,
+                df_train,
+                df_val,
+                fold,
+                df_test=df_test,
+                log_folder=log_folder,
             )
 
             if log_folder is None:
                 return pred_val, pred_test
-            
+
             np.save(log_folder + f"pred_val_{fold}.npy", pred_val)
             np.save(log_folder + f"pred_test_{fold}.npy", pred_test)
-            
+
             pred_oof[val_idx] = pred_val
             preds_test.append(pred_test)
             break
 
     if config.selected_folds == list(range(config.k)):
-        score = compute_metric(pred_oof, df['target'])
+        score = compute_metric(pred_oof, df["target"])
         print(f"\n\n -> CV score : {score:.4f}")
 
         if log_folder is not None:
             folds.to_csv(log_folder + "folds.csv", index=False)
             np.save(log_folder + "pred_oof.npy", pred_oof)
             df.to_csv(log_folder + "df.csv", index=False)
-            
+
     return pred_oof, np.mean(preds_test, 0)

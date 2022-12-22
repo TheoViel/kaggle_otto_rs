@@ -11,6 +11,7 @@ class LenMatchBatchSampler(BatchSampler):
     Custom PyTorch Sampler that generate batches of similar length.
     Used alongside with trim_tensor, it helps speed up training.
     """
+
     def __init__(self, sampler, batch_size, drop_last, pad_token=0):
         super().__init__(sampler, batch_size, drop_last)
         self.pad_token = pad_token
@@ -21,7 +22,9 @@ class LenMatchBatchSampler(BatchSampler):
         yielded = 0
 
         for idx in self.sampler:
-            count_zeros = torch.sum(self.sampler.data_source[idx]['ids'] == self.pad_token)
+            count_zeros = torch.sum(
+                self.sampler.data_source[idx]["ids"] == self.pad_token
+            )
             count_zeros = int(count_zeros / 10)
             if len(buckets[count_zeros]) == 0:
                 buckets[count_zeros] = []
@@ -48,7 +51,9 @@ class LenMatchBatchSampler(BatchSampler):
             yielded += 1
             yield batch
 
-        assert len(self) == yielded, f"Expected {len(self)}, but yielded {yielded} batches"
+        assert (
+            len(self) == yielded
+        ), f"Expected {len(self)}, but yielded {yielded} batches"
 
 
 def define_loaders(
@@ -57,7 +62,7 @@ def define_loaders(
     batch_size=32,
     val_bs=32,
     use_len_sampler=False,
-    pad_token=0
+    pad_token=0,
 ):
     """
     Builds data loaders.
@@ -78,7 +83,10 @@ def define_loaders(
 
     if use_len_sampler:
         len_sampler = LenMatchBatchSampler(
-            RandomSampler(train_dataset), batch_size=batch_size, drop_last=True, pad_token=pad_token
+            RandomSampler(train_dataset),
+            batch_size=batch_size,
+            drop_last=True,
+            pad_token=pad_token,
         )
         train_loader = DataLoader(
             train_dataset,

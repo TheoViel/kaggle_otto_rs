@@ -15,7 +15,7 @@ def predict(model, dataset, data_config, activation="softmax"):
 
     loader = DataLoader(
         dataset,
-        batch_size=data_config['val_bs'],
+        batch_size=data_config["val_bs"],
         shuffle=False,
         num_workers=NUM_WORKERS,
         pin_memory=True,
@@ -26,7 +26,7 @@ def predict(model, dataset, data_config, activation="softmax"):
         for data in loader:
             ids, token_type_ids = trim_tensors(
                 [data["ids"], data["token_type_ids"]],
-                pad_token=data_config['pad_token']
+                pad_token=data_config["pad_token"],
             )
 
             y_pred = model(ids.cuda(), token_type_ids.cuda())

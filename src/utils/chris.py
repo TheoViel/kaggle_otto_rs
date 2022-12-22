@@ -64,11 +64,7 @@ def suggest_buys(df, type_weighted_candids, cartbuy_candids, top_orders):
         # RERANK CANDIDATES USING "BUY2BUY" CO-VISITATION MATRIX
         aids3 = list(
             itertools.chain(
-                *[
-                    cartbuy_candids[aid]
-                    for aid in unique_buys
-                    if aid in cartbuy_candids
-                ]
+                *[cartbuy_candids[aid] for aid in unique_buys if aid in cartbuy_candids]
             )
         )
         for aid in aids3:
@@ -88,11 +84,7 @@ def suggest_buys(df, type_weighted_candids, cartbuy_candids, top_orders):
     # USE "BUY2BUY" CO-VISITATION MATRIX
     aids3 = list(
         itertools.chain(
-            *[
-                cartbuy_candids[aid]
-                for aid in unique_buys
-                if aid in cartbuy_candids
-            ]
+            *[cartbuy_candids[aid] for aid in unique_buys if aid in cartbuy_candids]
         )
     )
     # RERANK CANDIDATES

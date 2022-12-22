@@ -9,4 +9,4 @@ minutes = 600
 
 for _ in tqdm(range(100 * 60 * minutes)):
     time.sleep(0.01)
-    y = (x * y)
+    y = x * y

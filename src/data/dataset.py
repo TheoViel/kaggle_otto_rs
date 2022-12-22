@@ -13,8 +13,8 @@ class OttoDataset(Dataset):
         self.train = train
         self.max_len = max_len
         self.max_trunc = max_trunc
-        self.paths = df['path'].values
-        
+        self.paths = df["path"].values
+
         self.mu = 25
         self.ps = poisson.pmf(np.arange(self.mu, 1000), mu=self.mu)
         self.ps[0] *= 1.5  # More 1s
@@ -30,7 +30,7 @@ class OttoDataset(Dataset):
             padded = np.zeros([self.max_len] + list(x.shape[1:]))
             padded[:length] = x
             return padded
-    
+
     @staticmethod
     def add_cls_token(x):
         return np.concatenate([[CLS_TOKEN], x])
@@ -42,8 +42,8 @@ class OttoDataset(Dataset):
             range_ = np.arange(self.max_len - self.max_trunc, self.max_len)
         else:
             range_ = np.arange(len(x) - self.max_trunc, len(x))
-        
-        ps = self.ps[:len(range_)].copy()
+
+        ps = self.ps[: len(range_)].copy()
         ps /= ps.sum()
 
         if not self.train:  # deterministic
@@ -52,10 +52,10 @@ class OttoDataset(Dataset):
 
         return x[:trunc], x[trunc:]
 
-    def get_target(x, idx):
+    def get_target(self, x, idx):
         y = np.zeros((N_IDS, NUM_CLASSES), dtype=np.uint8)
 
-        y_dict = {'clicks': None, 'carts': [], 'orders': []}
+        y_dict = {"clicks": None, "carts": [], "orders": []}
 
         first = True
         for id_, _, c in x:
