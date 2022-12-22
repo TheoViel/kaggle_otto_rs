@@ -37,7 +37,12 @@ def create_kaggle_testset(sessions: pd.DataFrame, sessions_output: Path, labels_
 
     for _, session in tqdm(sessions.iterrows(), desc="Creating trimmed testset", total=len(sessions)):
         session = session.to_dict()
-        splitted_events, labels = split_events(session['events'])
+        try:
+            splitted_events, labels = split_events(session['events'])
+        except ValueError:
+#             print(f'Skipping session {session}')
+#             print()
+            continue
         last_labels.append({'session': session['session'], 'labels': labels})
         splitted_sessions.append({'session': session['session'], 'events': splitted_events})
 
@@ -66,23 +71,34 @@ def get_max_ts(sessions_file: Path) -> int:
     return max_ts
 
 
-@beartype
-def train_test_split(session_chunks: JsonReader, train_file: Path, test_file: Path, max_ts: int, test_days: int):
+def train_test_split(
+    session_chunks,
+    train_file,
+    test_file,
+    max_ts,
+    test_days=7,
+):
     split_millis = test_days * 24 * 60 * 60 * 1000
     split_ts = max_ts - split_millis
-    Path(train_file).parent.mkdir(parents=True, exist_ok=True)
-    train_file = open(train_file, "w")
+
+    if train_file is not None:
+        Path(train_file).parent.mkdir(parents=True, exist_ok=True)
+        train_file = open(train_file, "w")
+
     Path(test_file).parent.mkdir(parents=True, exist_ok=True)
     test_file = open(test_file, "w")
+
     for chunk in tqdm(session_chunks, desc="Splitting sessions"):
         for _, session in chunk.iterrows():
             session = session.to_dict()
             if session['events'][0]['ts'] > split_ts:
                 test_file.write(json.dumps(session, cls=setEncoder) + "\n")
-            else:
+            elif train_file is not None:
                 session = trim_session(session, split_ts)
                 train_file.write(json.dumps(session, cls=setEncoder) + "\n")
-    train_file.close()
+
+    if train_file is not None:
+        train_file.close()
     test_file.close()
 
 
