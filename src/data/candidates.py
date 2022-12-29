@@ -94,7 +94,7 @@ def explode(df):
         df_tgt = (
             df[["session", "candidates", col]].explode(col).reset_index(drop=True)
         ).fillna(-1)
-        df_tgt["gt_orders"] = df_tgt[col] == df_tgt["candidates"]
+        df_tgt[col] = df_tgt[col] == df_tgt["candidates"]
         df_tgt = df_tgt.groupby(["session", "candidates"]).max().reset_index()
         df_tgt = df_tgt.sort_values(["session", "candidates"]).reset_index(drop=True)
 
