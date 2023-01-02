@@ -21,13 +21,16 @@ def prepare_data(root):
     return df, df_test
 
 
-def json_to_pq(file, output_path=""):
+def json_to_pq(file, output_path="", name=None):
     """
     https://www.kaggle.com/datasets/columbia2131/otto-chunk-data-inparquet-format
     """
-    name = file.stem.split("_")[0]
+    if name is None:
+        name = file.stem.rsplit("_", 2)[0]
     save_folder = output_path / f"{name}_parquet"
     os.makedirs(save_folder, exist_ok=True)
+
+    print(f"Saving to {save_folder}")
 
     chunks = pd.read_json(file, lines=True, chunksize=100000)
 
@@ -50,11 +53,12 @@ def json_to_pq(file, output_path=""):
         pd.DataFrame(event_dict).to_parquet(save_folder / f"{e:03d}.parquet")
 
 
-def json_to_pq_y(file, output_path=""):
+def json_to_pq_y(file, output_path="", name=None):
     """
     https://www.kaggle.com/datasets/columbia2131/otto-chunk-data-inparquet-format
     """
-    name = file.stem
+    if name is None:
+        name = file.stem
     df = pd.read_json(file, lines=True)
 
     event_dict = {

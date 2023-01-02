@@ -49,6 +49,8 @@ def create_labels(file, output_path="", seed=42):
     sessions = pd.read_json(file, lines=True)
 
     name = file.stem.split("_")[0]
+    
+    name = name + "_c" if "_c" in file.stem else name
 
     sessions_file = output_path / f"{name}_sessions_c.jsonl"
     labels_file = output_path / f"{name}_labels.jsonl"

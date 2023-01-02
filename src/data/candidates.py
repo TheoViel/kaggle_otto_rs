@@ -10,7 +10,10 @@ def load_parquets(regex):
     dfs = []
     for e, chunk_file in enumerate(glob.glob(regex)):
         chunk = pd.read_parquet(chunk_file)
+        
+#         if "ts" in chunk.columns:
         chunk.ts = (chunk.ts / 1000).astype("int32")
+#         if "type" in chunk.columns:
         chunk["type"] = chunk["type"].map(TYPE_LABELS).astype("int8")
         dfs.append(chunk)
     return pd.concat(dfs).reset_index(drop=True)
@@ -41,7 +44,7 @@ def create_candidates(df, n_matrix=10, max_cooc=100):
         cudf.read_parquet(f"../output/matrices/matrix_123_temporal_{n_matrix}.pqt")
     )
     type_weighted_candids = matrix_to_candids_dict(
-        cudf.read_parquet(f"../output/matrices/matrix_123_type_{n_matrix}.pqt")
+        cudf.read_parquet(f"../output/matrices/matrix_123_type136_{n_matrix}.pqt")
     )
     # cartbuy_candidates = matrix_to_candids_dict(
     #     cudf.read_parquet(f"../output/matrices/matrix_12__{n_matrix}.pqt")

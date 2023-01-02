@@ -3,6 +3,7 @@ import gc
 import cudf
 import numba
 import numpy as np
+import pandas as pd
 
 from tqdm import tqdm
 
@@ -20,23 +21,19 @@ def compute_covisitation_matrix(
     n=0,
     save_folder="",
 ):
-    # MERGE IS FASTEST PROCESSING CHUNKS WITHIN CHUNKS => OUTER CHUNKS
-    for j in tqdm(range(6)):
-        READ_CT = 6
-        CHUNK = int(np.ceil(len(files) / READ_CT))
+    DISK_PIECES = 4
+    SIZE = 1.86e6 / DISK_PIECES
 
-        a = j * CHUNK
-        b = min((j + 1) * CHUNK, len(files))
+    chunks = [files[x: x + 10] for x in range(0, len(files), 10)]
 
-        # => INNER CHUNKS
-        for k in range(a, b, READ_CT):
-            # READ FILE
-            df = [read_file(files[k], data_cache)]
-            for i in range(1, READ_CT):
-                if k + i < b:
-                    df.append(read_file(files[k + i], data_cache))
-            df = cudf.concat(df, ignore_index=True, axis=0)
-
+    matrices = []
+    for part in range(DISK_PIECES): 
+        for idx, chunk in enumerate(tqdm(chunks)):
+            df = cudf.concat(
+                [read_file(file, data_cache) for file in chunk],
+                ignore_index=True
+            )
+    
             if considered_types != [1, 2, 3]:
                 df = df.loc[df["type"].isin(considered_types)]
 
@@ -52,6 +49,9 @@ def compute_covisitation_matrix(
             df = df.loc[  # Less than 1h appart, different ID
                 ((df.ts_x - df.ts_y).abs() < 24 * 60 * 60) & (df.aid_x != df.aid_y)
             ]
+            
+            # SAVE MEM
+            df = df.loc[(df.aid_x >= part * SIZE) & (df.aid_x < (part + 1) * SIZE)]
 
             # ASSIGN WEIGHTS
             df = df[["session", "aid_x", "aid_y", "ts_x", "type_y"]].drop_duplicates(
@@ -73,30 +73,28 @@ def compute_covisitation_matrix(
             df = df.groupby(["aid_x", "aid_y"]).wgt.sum()
 
             # COMBINE INNER CHUNKS
-            if k == a:
-                matrix_chunk = df
+            if idx == 0:
+                matrix = df
             else:
-                matrix_chunk = matrix_chunk.add(df, fill_value=0)
+                matrix = matrix.add(df, fill_value=0)
 
-        # COMBINE OUTER CHUNKS
-        if a == 0:
-            matrix = matrix_chunk
-        else:
-            matrix = matrix.add(matrix_chunk, fill_value=0)
-        del matrix_chunk, df
-        gc.collect()
+            del df
+            numba.cuda.current_context().deallocations.clear()
+            gc.collect()
 
-    # CONVERT MATRIX TO DICTIONARY
-    matrix = matrix.reset_index()
-    matrix = matrix.sort_values(["aid_x", "wgt"], ascending=[True, False])
+        # CONVERT MATRIX TO DICTIONARY
+        matrix = matrix.reset_index()
+        matrix = matrix.sort_values(["aid_x", "wgt"], ascending=[True, False])
 
-    # SAVE TOP 40
-    matrix = matrix.reset_index(drop=True)
-    matrix["n"] = matrix.groupby("aid_x").aid_y.cumcount()
+        # SAVE TOP N
+        matrix = matrix.reset_index(drop=True)
+        matrix["n"] = matrix.groupby("aid_x").aid_y.cumcount()
 
-    if n:
-        matrix = matrix.loc[matrix.n < n].drop("n", axis=1)
-
+        if n:
+            matrix = matrix.loc[matrix.n < n].drop("n", axis=1)
+            
+        matrices.append(matrix.to_pandas())
+    
     if save_folder:
         if weighting == "type":
             weighting += "".join(map(str, list(type_weight.values())))
@@ -105,9 +103,8 @@ def compute_covisitation_matrix(
             f'matrix_{"".join(map(str, considered_types))}_{weighting}_{n}.pqt',
         )
         print(f"Saving matrix to {save_path}")
-        matrix.to_pandas().to_parquet(save_path)
+        pd.concat(matrices, ignore_index=True).to_parquet(save_path)
 
     numba.cuda.current_context().deallocations.clear()
-
 
 #     return matrix
