@@ -39,17 +39,7 @@ def matrix_to_candids_dict(matrix):
     return candids_dict
 
 
-def create_candidates(df, n_matrix=10, max_cooc=100):
-    clicks_candids = matrix_to_candids_dict(
-        cudf.read_parquet(f"../output/matrices/matrix_123_temporal_{n_matrix}.pqt")
-    )
-    type_weighted_candids = matrix_to_candids_dict(
-        cudf.read_parquet(f"../output/matrices/matrix_123_type136_{n_matrix}.pqt")
-    )
-    # cartbuy_candidates = matrix_to_candids_dict(
-    #     cudf.read_parquet(f"../output/matrices/matrix_12__{n_matrix}.pqt")
-    # )
-
+def create_candidates(df, clicks_candids, type_weighted_candids, max_cooc=100):
     df["clicks_candidates"] = df["aid"].map(clicks_candids)
     df["type_weighted_candidates"] = df["aid"].map(type_weighted_candids)
     # df["cartbuy_candidates"] = df["aid"].map(cartbuy_candidates)

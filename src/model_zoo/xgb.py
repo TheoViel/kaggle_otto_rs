@@ -1,5 +1,6 @@
 import gc
 import cudf
+import glob
 import numba
 import numpy as np
 import pandas as pd
@@ -7,7 +8,7 @@ import xgboost as xgb
 
 from tqdm import tqdm
 from sklearn.metrics import roc_auc_score
-
+from utils.load import load_parquets_cudf
 
 def objective_xgb(trial, df_train, df_val, features, target="match"):
     xgb_params = dict(
@@ -83,8 +84,8 @@ class IterLoadForDMatrix(xgb.core.DataIter):
 
 def train_xgb(
     df_train,
-    df_val,
-    df_test=None,
+    val_regex,
+    df_test=None,  # ??
     features=[],
     target="",
     params=None,
@@ -96,12 +97,12 @@ def train_xgb(
 
     dtrain = xgb.DeviceQuantileDMatrix(iter_train, max_bin=256)
     
-    df_es = df_val.head(n_candidates_es) if n_candidates_es else df_val
+    df_es = load_parquets_cudf(val_regex, max_n=5)
     dval = xgb.DMatrix(data=df_es[features], label=df_es[target])
-    
-#     del df_es
-#     numba.cuda.current_context().deallocations.clear()
-#     gc.collect()
+
+    del df_es, df_train
+    numba.cuda.current_context().deallocations.clear()
+    gc.collect()
 
     # TRAIN MODEL FOLD K
     model = xgb.train(
@@ -117,29 +118,25 @@ def train_xgb(
     numba.cuda.current_context().deallocations.clear()
     gc.collect()
 
-#     dval = xgb.DMatrix(data=df_val[features])
-#     iter_val = IterLoadForDMatrix(df_es, features, target)
-#     dval = xgb.QuantileDMatrix(iter_val, ref=dtrain, max_bin=256)
-
-#     pred_val = model.predict(dval)
-    pred_val = predict_batched(model, df_val, features)
+    pred_val = predict_batched(model, val_regex, features)
 
     return pred_val, model
 
 
-def predict_batched(model, df, features):
-    df['group'] = df['session'] // 100000
+def predict_batched(model, dfs_regex, features):
+    print('\n[Infering]')
 
     dfs = []
-    for _, dfg in tqdm(df.groupby('group')):
+    for path in tqdm(glob.glob(dfs_regex)):
+        dfg = cudf.read_parquet(path)
         dval = xgb.DMatrix(data=dfg[features])
+
         dfg['pred'] = model.predict(dval)
-        dfs.append(dfg[['session', 'candidates', 'pred']])
+        dfs.append(dfg[['session', 'candidates', 'gt_clicks', 'gt_carts', 'gt_orders', 'pred']])
 
         del dval, dfg
         numba.cuda.current_context().deallocations.clear()
         gc.collect()
 
     results = cudf.concat(dfs, ignore_index=True).sort_values(['session', 'candidates'])
-
-    return results['pred'].astype('float32').values
+    return results

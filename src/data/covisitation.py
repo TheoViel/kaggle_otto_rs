@@ -20,6 +20,7 @@ def compute_covisitation_matrix(
     considered_types=[1, 2, 3],
     n=0,
     save_folder="",
+    suffix="",
 ):
     DISK_PIECES = 4
     SIZE = 1.86e6 / DISK_PIECES
@@ -100,7 +101,7 @@ def compute_covisitation_matrix(
             weighting += "".join(map(str, list(type_weight.values())))
         save_path = os.path.join(
             save_folder,
-            f'matrix_{"".join(map(str, considered_types))}_{weighting}_{n}.pqt',
+            f'matrix_{"".join(map(str, considered_types))}_{weighting}_{n}_{suffix}.pqt',
         )
         print(f"Saving matrix to {save_path}")
         pd.concat(matrices, ignore_index=True).to_parquet(save_path)

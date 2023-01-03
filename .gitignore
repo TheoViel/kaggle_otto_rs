@@ -19,11 +19,13 @@ __pycache__/
 *.csv
 *.tsv
 *.txt
+*.log
+core
 
 # Folders
 logs/
 output/
-models/
+/models/
 input/
 weights_*/
 notebooks/.ipynb_checkpoints/

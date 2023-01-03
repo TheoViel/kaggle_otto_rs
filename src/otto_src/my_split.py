@@ -16,9 +16,10 @@ def val_split(train_set, output_path, days=7):
 
 
 def train_val_split(train_set, output_path, days=7, train_only=False):
-    file = output_path / "sessions.jsonl"
-    val_file = output_path / "val_sessions.jsonl"
-    train_file = output_path / "train_sessions.jsonl"
+    file = output_path / "sessions.jsonl"  # First 3 weeks
+    val_file = output_path / "val_sessions.jsonl"  # Week 4
+    train_file = output_path / "train_sessions.jsonl"  # Week 3
+    other_file = output_path / "other_sessions.jsonl"  # First 2 weeks
 
     if not train_only:
         max_ts = get_max_ts(train_set)
@@ -42,14 +43,16 @@ def train_val_split(train_set, output_path, days=7, train_only=False):
     if train_file.exists():
         os.remove(train_file)
 
-    train_test_split(session_chunks, None, train_file, max_ts, days)
+    if other_file.exists():
+        os.remove(other_file)
+
+    train_test_split(session_chunks, other_file, train_file, max_ts, days)
 
 
 def create_labels(file, output_path="", seed=42):
     sessions = pd.read_json(file, lines=True)
 
     name = file.stem.split("_")[0]
-    
     name = name + "_c" if "_c" in file.stem else name
 
     sessions_file = output_path / f"{name}_sessions_c.jsonl"

@@ -84,28 +84,35 @@ def train_test_split(
     max_ts,
     test_days=7,
 ):
+    assert (test_file is not None) or (train_file is not None), "Saving nothing !"
+
     split_millis = test_days * 24 * 60 * 60 * 1000
     split_ts = max_ts - split_millis
 
     if train_file is not None:
         Path(train_file).parent.mkdir(parents=True, exist_ok=True)
         train_file = open(train_file, "w")
+        print(f'- Saving train sessions to {train_file}')
 
-    Path(test_file).parent.mkdir(parents=True, exist_ok=True)
-    test_file = open(test_file, "w")
+    if test_file is not None:
+        Path(test_file).parent.mkdir(parents=True, exist_ok=True)
+        test_file = open(test_file, "w")
+        print(f'- Saving test sessions to {test_file}')
 
     for chunk in tqdm(session_chunks, desc="Splitting sessions"):
         for _, session in chunk.iterrows():
             session = session.to_dict()
-            if session["events"][0]["ts"] > split_ts:
-                test_file.write(json.dumps(session, cls=setEncoder) + "\n")
-            elif train_file is not None:
+            if session["events"][0]["ts"] > split_ts:  # After split -> test
+                if test_file is not None:
+                    test_file.write(json.dumps(session, cls=setEncoder) + "\n")
+            elif train_file is not None:  # Train
                 session = trim_session(session, split_ts)
                 train_file.write(json.dumps(session, cls=setEncoder) + "\n")
 
     if train_file is not None:
         train_file.close()
-    test_file.close()
+    if test_file is not None:
+        test_file.close()
 
 
 @beartype
