@@ -1,5 +1,6 @@
 import glob
 import cudf
+import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
@@ -17,24 +18,12 @@ def load_parquets_pd(regex):
     return df
 
 
-def load_parquets_cudf(regex, max_n=0):
-    dfs = []
-    for idx, chunk_file in enumerate(glob.glob(regex)):
-        chunk = cudf.read_parquet(chunk_file)
-        dfs.append(chunk)
-
-        if max_n and idx >= max_n:
-            break
-
-    return cudf.concat(dfs).reset_index(drop=True)
-
-
 def load_parquets_cudf(regex, max_n=0, pos_ratio=0, target=""):
     dfs = []
     for idx, chunk_file in enumerate(glob.glob(regex)):
         df = cudf.read_parquet(chunk_file)
         
-        if target:
+        if target:  # Negative downsampling
             df = df.reset_index(drop=True)
             pos = df.index[df[target] == 1]
             
@@ -51,6 +40,33 @@ def load_parquets_cudf(regex, max_n=0, pos_ratio=0, target=""):
             break
 
     return cudf.concat(dfs).reset_index(drop=True)
+
+
+def load_parquets_cudf_chunks(regex, pos_ratio=0, target="", n_chunks=3):
+    files = sorted(glob.glob(regex))
+    n = int(np.ceil(len(files) / n_chunks))
+    chunks = [files[c: c + n] for c in range(0, len(files), n)]
+
+    dfs = []
+    for chunk in tqdm(chunks):
+
+        df = []
+        for file in chunk:
+            df.append(cudf.read_parquet(file))
+        df = cudf.concat(df, ignore_index=True)
+    
+        if target:
+            pos = df.index[df[target] == 1]
+
+            if pos_ratio:
+                n_neg = int(df[target].sum() / pos_ratio)
+                neg = df[[target]][df[target] == 0].sample(n_neg).index
+                df = df.iloc[cudf.concat([pos, neg])]
+            else:  # only positives
+                df = df.iloc[pos]
+        dfs.append(df)
+
+    return cudf.concat(dfs, ignore_index=True)
 
 
 def load_sessions(regexes):
