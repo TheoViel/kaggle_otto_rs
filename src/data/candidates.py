@@ -73,8 +73,10 @@ def create_candidates(df, clicks_candids, type_weighted_candids, max_cooc=100):
     return df
 
 
-def explode(df):
-    df.drop(["aid", "type"], axis=1, inplace=True)
+def explode(df, test=False):
+    if "aid" in df.columns:
+        df.drop(["aid", "type"], axis=1, inplace=True)
+
     df = cudf.from_pandas(df)
 
     df = df.explode("candidates")
@@ -83,14 +85,15 @@ def explode(df):
 
     df = df.sort_values(["session", "candidates"]).reset_index(drop=True)
 
-    for col in ["gt_clicks", "gt_carts", "gt_orders"]:
-        df_tgt = (
-            df[["session", "candidates", col]].explode(col).reset_index(drop=True)
-        ).fillna(-1)
-        df_tgt[col] = df_tgt[col] == df_tgt["candidates"]
-        df_tgt = df_tgt.groupby(["session", "candidates"]).max().reset_index()
-        df_tgt = df_tgt.sort_values(["session", "candidates"]).reset_index(drop=True)
+    if not test:
+        for col in ["gt_clicks", "gt_carts", "gt_orders"]:
+            df_tgt = (
+                df[["session", "candidates", col]].explode(col).reset_index(drop=True)
+            ).fillna(-1)
+            df_tgt[col] = df_tgt[col] == df_tgt["candidates"]
+            df_tgt = df_tgt.groupby(["session", "candidates"]).max().reset_index()
+            df_tgt = df_tgt.sort_values(["session", "candidates"]).reset_index(drop=True)
 
-        df[col] = df_tgt[col].astype("uint8")
+            df[col] = df_tgt[col].astype("uint8")
 
     return df

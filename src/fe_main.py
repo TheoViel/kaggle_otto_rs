@@ -17,7 +17,7 @@ from utils.load import load_sessions
 def main(mode="train"):
     # Params
     MODE = mode
-    CANDIDATES_VERSION = "v4"
+    CANDIDATES_VERSION = "v3"
     FEATURES_VERSION = "5"
 
     SUFFIX = f"{CANDIDATES_VERSION}.{FEATURES_VERSION}"
@@ -28,6 +28,8 @@ def main(mode="train"):
         OLD_PARQUET_FILES = "../output/full_train_parquet/*"
     elif MODE == "train":
         OLD_PARQUET_FILES = "../output/other_parquet/*"
+    elif MODE == "test":
+        OLD_PARQUET_FILES = "../output/full_train_val_parquet/*"
     else:
         raise NotImplementedError
         
@@ -155,8 +157,8 @@ def parse_args():
     parser.add_argument(
         "--mode",
         type=str,
-        default=0,
-        help="Fold number",
+        default="train",
+        help="Mode",
     )
 
     return parser.parse_args()
@@ -165,7 +167,7 @@ def parse_args():
 if __name__ == "__main__":
     args = parse_args()
     
-    assert args.mode in ["train", "val"]  # TODO : test
+    assert args.mode in ["train", "val", "test"]
 
     main(args.mode)
     

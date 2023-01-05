@@ -85,22 +85,22 @@ class IterLoadForDMatrix(xgb.core.DataIter):
 def train_xgb(
     df_train,
     val_regex,
-    df_test=None,  # ??
     features=[],
     target="",
     params=None,
     cat_features=[],  # TODO
-    n_candidates_es=0,
-    i=0,
+    use_es=0,
+    num_boost_round=10000
 ):
     iter_train = IterLoadForDMatrix(df_train, features, target)
-
     dtrain = xgb.DeviceQuantileDMatrix(iter_train, max_bin=256)
-    
-    df_es = load_parquets_cudf(val_regex, max_n=5)
-    dval = xgb.DMatrix(data=df_es[features], label=df_es[target])
 
-    del df_es, df_train
+    if use_es:
+        df_es = load_parquets_cudf(val_regex, max_n=5)
+        dval = xgb.DMatrix(data=df_es[features], label=df_es[target])
+        del df_es
+
+    del df_train
     numba.cuda.current_context().deallocations.clear()
     gc.collect()
 
@@ -108,13 +108,15 @@ def train_xgb(
     model = xgb.train(
         params,
         dtrain=dtrain,
-        evals=[(dval, "val")],
-        num_boost_round=10000,
-        early_stopping_rounds=100,
-        verbose_eval=100,
+        evals=[(dval, "val")] if use_es else None,
+        num_boost_round=num_boost_round,
+        early_stopping_rounds=100 if use_es else None,
+        verbose_eval=100 if use_es else None,
     )
     
-    del dval, dtrain, iter_train
+    if use_es:
+        del dval
+    del dtrain, iter_train
     numba.cuda.current_context().deallocations.clear()
     gc.collect()
 
@@ -125,6 +127,7 @@ def train_xgb(
 
 def predict_batched(model, dfs_regex, features):
     print('\n[Infering]')
+    cols = ['session', 'candidates', 'gt_clicks', 'gt_carts', 'gt_orders', 'pred']
 
     dfs = []
     for path in tqdm(glob.glob(dfs_regex)):
@@ -132,7 +135,7 @@ def predict_batched(model, dfs_regex, features):
         dval = xgb.DMatrix(data=dfg[features])
 
         dfg['pred'] = model.predict(dval)
-        dfs.append(dfg[['session', 'candidates', 'gt_clicks', 'gt_carts', 'gt_orders', 'pred']])
+        dfs.append(dfg[[c for c in cols if c in dfg.columns]])
 
         del dval, dfg
         numba.cuda.current_context().deallocations.clear()
