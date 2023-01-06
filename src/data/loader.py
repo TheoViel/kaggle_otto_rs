@@ -1,6 +1,7 @@
 import torch
-from torch.utils.data.sampler import BatchSampler, RandomSampler
+import numpy as np
 from torch.utils.data import DataLoader
+from torch.utils.data.sampler import Sampler, BatchSampler, RandomSampler, WeightedRandomSampler
 
 from utils.torch import worker_init_fn
 from params import NUM_WORKERS
@@ -9,33 +10,24 @@ from params import NUM_WORKERS
 class LenMatchBatchSampler(BatchSampler):
     """
     Custom PyTorch Sampler that generate batches of similar length.
-    Used alongside with trim_tensor, it helps speed up training.
+    Helps speed up training.
     """
-
-    def __init__(self, sampler, batch_size, drop_last, pad_token=0):
-        super().__init__(sampler, batch_size, drop_last)
-        self.pad_token = pad_token
-
     def __iter__(self):
-
         buckets = [[]] * 1000
         yielded = 0
 
         for idx in self.sampler:
-            count_zeros = torch.sum(
-                self.sampler.data_source[idx]["ids"] == self.pad_token
-            )
-            count_zeros = int(count_zeros / 10)
-            if len(buckets[count_zeros]) == 0:
-                buckets[count_zeros] = []
+            bucket_id = self.sampler.data_source[idx][0].size(-1) // 20
+            if len(buckets[bucket_id]) == 0:
+                buckets[bucket_id] = []
 
-            buckets[count_zeros].append(idx)
+            buckets[bucket_id].append(idx)
 
-            if len(buckets[count_zeros]) == self.batch_size:
-                batch = list(buckets[count_zeros])
+            if len(buckets[bucket_id]) == self.batch_size:
+                batch = list(buckets[bucket_id])
                 yield batch
                 yielded += 1
-                buckets[count_zeros] = []
+                buckets[bucket_id] = []
 
         batch = []
         leftover = [idx for bucket in buckets for idx in bucket]
@@ -51,9 +43,54 @@ class LenMatchBatchSampler(BatchSampler):
             yielded += 1
             yield batch
 
-        assert (
-            len(self) == yielded
-        ), f"Expected {len(self)}, but yielded {yielded} batches"
+        assert len(self) == yielded, f"Expected {len(self)}, but yielded {yielded} batches"
+
+
+def custom_collate_fn(batch):
+
+    y = torch.stack([b[1] for b in batch])
+    y_aux = torch.stack([b[2] for b in batch])
+
+#     print([b[0].size(-1) for b in batch])
+    max_w = np.max([b[0].size(2) for b in batch])
+    max_h = np.max([b[0].size(1) for b in batch])
+
+    size = (len(batch), batch[0][0].size(0), max_h, max_w)
+    x = torch.zeros(size, device=y.device)
+    
+    for i, b in enumerate(batch):
+        mid = (max_w - b[0].size(-1)) // 2
+        x[i, :, :b[0].size(1), mid : mid + b[0].size(2)] = b[0]
+
+    return x, y, y_aux
+
+
+class BalancedSampler(Sampler):
+    """
+    By Heng.
+    """
+    def __init__(self, dataset, batch_size, n_pos=1):
+        self.r = batch_size - n_pos
+        self.dataset = dataset
+        self.pos_index = np.where(dataset.targets > 0)[0]
+        self.neg_index = np.where(dataset.targets == 0)[0]
+
+        self.length = self.r * int(np.floor(len(self.neg_index) / self.r))
+
+    def __iter__(self):
+        pos_index = self.pos_index.copy()
+        neg_index = self.neg_index.copy()
+        np.random.shuffle(pos_index)
+        np.random.shuffle(neg_index)
+
+        neg_index = neg_index[:self.length].reshape(-1, self.r)
+        pos_index = np.random.choice(pos_index, self.length // self.r).reshape(-1, 1)
+
+        index = np.concatenate([pos_index, neg_index], -1).reshape(-1)
+        return iter(index)
+
+    def __len__(self):
+        return self.length
 
 
 def define_loaders(
@@ -61,32 +98,40 @@ def define_loaders(
     val_dataset,
     batch_size=32,
     val_bs=32,
+    use_weighted_sampler=False,
     use_len_sampler=False,
-    pad_token=0,
+    use_balanced_sampler=False,
+    use_custom_collate=False,
 ):
     """
     Builds data loaders.
     TODO
-
     Args:
         train_dataset (BCCDataset): Dataset to train with.
         val_dataset (BCCDataset): Dataset to validate with.
-        samples_per_group (int, optional): Number of images to use per group. Defaults to 0.
-        class_multipliers (dict, optional): Coefficients to increase class sampling. Defaults to {}.
         batch_size (int, optional): Training batch size. Defaults to 32.
         val_bs (int, optional): Validation batch size. Defaults to 32.
-
     Returns:
        DataLoader: Train loader.
        DataLoader: Val loader.
     """
+    collate_fn = custom_collate_fn if use_custom_collate else None
+
+    sampler = None
+    if use_weighted_sampler:
+        sampler = WeightedRandomSampler(
+            train_dataset.sample_weights,
+            len(train_dataset),
+            replacement=True,
+        )
+    elif use_balanced_sampler:
+        sampler = BalancedSampler(train_dataset, batch_size, n_pos=1)
 
     if use_len_sampler:
         len_sampler = LenMatchBatchSampler(
-            RandomSampler(train_dataset),
+            RandomSampler(train_dataset) if sampler is None else sampler,  # weighted sampler may not work
             batch_size=batch_size,
-            drop_last=True,
-            pad_token=pad_token,
+            drop_last=True
         )
         train_loader = DataLoader(
             train_dataset,
@@ -94,25 +139,34 @@ def define_loaders(
             num_workers=NUM_WORKERS,
             pin_memory=True,
             worker_init_fn=worker_init_fn,
+            collate_fn=collate_fn,
+            persistent_workers=True,
         )
 
     else:
         train_loader = DataLoader(
             train_dataset,
             batch_size=batch_size,
-            shuffle=True,
+            sampler=sampler,
+            shuffle=sampler is None,
             drop_last=True,
             num_workers=NUM_WORKERS,
             pin_memory=True,
             worker_init_fn=worker_init_fn,
+            collate_fn=collate_fn,
+            persistent_workers=True,
         )
 
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=val_bs,
-        shuffle=False,
-        num_workers=NUM_WORKERS,
-        pin_memory=True,
-    )
+    val_loader = None
+    if val_dataset is not None:
+        val_loader = DataLoader(
+            val_dataset,
+            batch_size=val_bs,
+            shuffle=False,
+            num_workers=NUM_WORKERS,
+            pin_memory=True,
+            collate_fn=collate_fn,
+            persistent_workers=True,
+        )
 
     return train_loader, val_loader

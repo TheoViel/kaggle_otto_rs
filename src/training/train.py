@@ -2,32 +2,26 @@ import gc
 import time
 import torch
 import numpy as np
-
-from torchcontrib.optim import SWA
+from sklearn.metrics import roc_auc_score, accuracy_score
 from transformers import get_linear_schedule_with_warmup
 
-from utils.metric import compute_metric
-
+from training.losses import ClsLoss
 from data.loader import define_loaders
-from training.losses import NBMELoss
-from training.optim import custom_params, define_optimizer, trim_tensors, AWP
+from training.optim import define_optimizer
+from params import WEIGHTS
 
 
-def evaluate(model, val_loader, data_config, loss_config, loss_fct):
+def evaluate(model, val_loader, loss_config, loss_fct, use_fp16=False):
     model.eval()
     avg_val_loss = 0.0
-    preds = []
+    preds, preds_aux = [], []
+
     with torch.no_grad():
-        for data in val_loader:
-            y_batch = data["target"]
-            ids, token_type_ids = trim_tensors(
-                [data["ids"], data["token_type_ids"]],
-                pad_token=data_config["pad_token"],
-            )
+        for x, y in val_loader:
+            with torch.cuda.amp.autocast(enabled=use_fp16):
+                y_pred = model(x.cuda())
+                loss = loss_fct(y_pred.detach(), y.cuda())
 
-            y_pred = model(ids.cuda(), token_type_ids.cuda())
-
-            loss = loss_fct(y_pred.detach(), y_batch.cuda()).mean()
             avg_val_loss += loss / len(val_loader)
 
             if loss_config["activation"] == "sigmoid":
@@ -36,7 +30,6 @@ def evaluate(model, val_loader, data_config, loss_config, loss_fct):
                 y_pred = y_pred.softmax(-1)
 
             preds.append(y_pred.detach().cpu().numpy())
-
     return np.concatenate(preds), avg_val_loss
 
 
@@ -47,163 +40,102 @@ def fit(
     data_config,
     loss_config,
     optimizer_config,
-    epochs=5,
-    acc_steps=1,
+    epochs=1,
     verbose_eval=1,
     device="cuda",
     use_fp16=False,
-    gradient_checkpointing=False,
+    run=None,
+    fold=0,
 ):
     """
-    Training functiong.
+    Training function.
     TODO
-
     Args:
-
     Returns:
     """
     scaler = torch.cuda.amp.GradScaler()
 
-    if gradient_checkpointing:
-        model.transformer.gradient_checkpointing_enable()
-
-    opt_params = custom_params(
-        model,
-        lr=optimizer_config["lr"],
-        weight_decay=optimizer_config["weight_decay"],
-        lr_transfo=optimizer_config["lr_transfo"],
-        lr_decay=optimizer_config["lr_decay"],
-    )
     optimizer = define_optimizer(
         optimizer_config["name"],
-        opt_params,
+        model.parameters(),
         lr=optimizer_config["lr"],
         betas=optimizer_config["betas"],
     )
-    optimizer.zero_grad()
 
-    if optimizer_config["use_swa"]:
-        optimizer = SWA(
-            optimizer,
-            swa_start=optimizer_config["swa_start"],
-            swa_freq=optimizer_config["swa_freq"],
-        )
-
-    loss_fct = NBMELoss(loss_config, device=device)
-
-    if optimizer_config["use_awp"]:
-        awp = AWP(
-            model,
-            optimizer,
-            loss_fct,
-            adv_lr=optimizer_config["awp_lr"],
-            adv_eps=optimizer_config["awp_eps"],
-            start_step=optimizer_config["awp_start_step"],
-            scaler=scaler,
-        )
+    loss_fct = ClsLoss(loss_config)
 
     train_loader, val_loader = define_loaders(
         train_dataset,
         val_dataset,
         batch_size=data_config["batch_size"],
         val_bs=data_config["val_bs"],
-        use_len_sampler=data_config["use_len_sampler"],
-        pad_token=data_config["pad_token"],
+        use_weighted_sampler=data_config["use_weighted_sampler"],
+        use_balanced_sampler=data_config["use_balanced_sampler"],
     )
 
     # LR Scheduler
-    num_training_steps = epochs * len(train_loader) // acc_steps
+    num_training_steps = epochs * len(train_loader)
     num_warmup_steps = int(optimizer_config["warmup_prop"] * num_training_steps)
     scheduler = get_linear_schedule_with_warmup(
         optimizer, num_warmup_steps, num_training_steps
     )
 
+    auc = 0
     step = 1
-    avg_losses = []
+    preds = None
+    avg_losses, aucs = [], []
     start_time = time.time()
     for epoch in range(1, epochs + 1):
-        for data in train_loader:
-            ids, token_type_ids = trim_tensors(
-                [data["ids"], data["token_type_ids"]],
-                pad_token=data_config["pad_token"],
-            )
-            y_batch = data["target"]
-
+        for x, y in train_loader:
             with torch.cuda.amp.autocast(enabled=use_fp16):
-                y_pred = model(ids.cuda(), token_type_ids.cuda())
-                loss = loss_fct(y_pred, y_batch.cuda()).mean() / acc_steps
+                y_pred = model(x.cuda())
+                loss = loss_fct(y_pred, y.cuda())
 
             scaler.scale(loss).backward()
-            avg_losses.append(loss.item() * acc_steps)
+            avg_losses.append(loss.detach().cpu())
 
-            if (
-                optimizer_config["use_awp"]
-                and (step % optimizer_config["awp_period"]) == 0
-            ):
-                awp.attack_backward(
-                    ids, token_type_ids, y_batch, step, use_fp16=use_fp16
-                )
+            scaler.unscale_(optimizer)
 
-            if step % acc_steps == 0:
-                scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(
-                    model.parameters(),
-                    optimizer_config["max_grad_norm"],
-                    error_if_nonfinite=False,
-                )
+            scaler.step(optimizer)
+            scale = scaler.get_scale()
+            scaler.update()
 
-                scaler.step(optimizer)
-                scale = scaler.get_scale()
-                scaler.update()
+            if scale == scaler.get_scale():
+                scheduler.step()
 
-                if scale == scaler.get_scale():
-                    scheduler.step()
-
-                for param in model.parameters():
-                    param.grad = None
+            model.zero_grad(set_to_none=True)
 
             step += 1
-            if step % (verbose_eval * acc_steps) == 0 or step - 1 == epochs * len(
-                train_loader
-            ):
-                if 0 <= epochs * len(train_loader) - step < verbose_eval * acc_steps:
+            if (step % verbose_eval) == 0 or step - 1 == epochs * len(train_loader):
+                if 0 <= epochs * len(train_loader) - step < verbose_eval:
                     continue
 
-                if (
-                    step // acc_steps
-                    > optimizer_config["swa_start"] + optimizer_config["swa_freq"]
-                    and optimizer_config["use_swa"]
-                ):
-                    optimizer.swap_swa_sgd()
-
-                preds, avg_val_loss = evaluate(
-                    model, val_loader, data_config, loss_config, loss_fct
-                )
-
-                if (
-                    step // acc_steps
-                    > optimizer_config["swa_start"] + optimizer_config["swa_freq"]
-                    and optimizer_config["use_swa"]
-                ):
-                    optimizer.swap_swa_sgd()
-
-                score = compute_metric(preds, val_dataset.targets)
+                if val_loader is not None:
+                    preds, avg_val_loss = evaluate(
+                        model, val_loader, loss_config, loss_fct, use_fp16=use_fp16
+                    )
+                    aucs = [roc_auc_score(val_dataset.targets[:, i], preds[:, i]) for i in range(preds.shape[-1])]
+                    auc = np.average(aucs, weights=WEIGHTS)
 
                 dt = time.time() - start_time
                 lr = scheduler.get_last_lr()[0]
 
-                s = f"Epoch {epoch:02d}/{epochs:02d}  (step {step // acc_steps:04d})\t"
-                s = s + f"lr={lr:.1e}\t t={dt:.0f}s\t loss={np.mean(avg_losses):.3f}"
+                s = f"Epoch {epoch:02d}/{epochs:02d} (step {step:04d}) \t"
+                s = s + f"lr={lr:.1e} \t t={dt:.0f}s \t loss={np.mean(avg_losses):.3f}"
                 s = s + f"\t val_loss={avg_val_loss:.3f}" if avg_val_loss else s
-                s = s + f"\t score={score:.3f}" if score else s
+                s = s + f"\t auc={auc:.4f}  " if auc else s
+                s = s + f"{tuple(list(np.round(aucs, 3)))}" if len(aucs) else s
                 print(s)
+
+                if run is not None:
+                    run[f"fold_{fold}/train/epoch"].log(epoch, step=step)
+                    run[f"fold_{fold}/train/loss"].log(np.mean(avg_losses), step=step)
+                    run[f"fold_{fold}/val/loss"].log(avg_val_loss, step=step)
+                    run[f"fold_{fold}/val/auc"].log(auc, step=step)
 
                 start_time = time.time()
                 avg_losses = []
                 model.train()
-
-    if optimizer_config["use_swa"]:
-        optimizer.swap_swa_sgd()
 
     del (train_loader, val_loader, optimizer)
     torch.cuda.empty_cache()

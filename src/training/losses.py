@@ -49,31 +49,30 @@ class SmoothCrossEntropyLoss(nn.Module):
         return loss
 
 
-class NBMELoss(nn.Module):
+class ClsLoss(nn.Module):
     def __init__(self, config, device="cuda"):
         super().__init__()
         self.config = config
-        self.defice = device
+        self.device = device
+        self.class_weights = torch.tensor([0.1, 0.3, 0.6]).to(device)
 
         if self.config["name"] == "bce":
             self.loss = nn.BCEWithLogitsLoss(reduction="none")
         elif self.config["name"] == "ce":
             self.loss = SmoothCrossEntropyLoss(eps=config["smoothing"])
-        elif self.config["name"] == "mse":
-            self.loss = nn.MSELoss(reduction="none")
         else:
             raise NotImplementedError(f"Loss name {self.config['name']} not supported")
 
     def prepare(self, pred, y):
-        y = y.view(-1)
-        if self.config["name"] == "ce":
-            pred = pred.view(y.size(0), -1)
-        else:
-            pred = pred.view(-1)
-            y = y.float()
+        y = y.float()
+        pred = pred.view(y.size())
         return pred, y
 
     def forward(self, pred, y):
         pred, y = self.prepare(pred, y)
         loss = self.loss(pred, y)
-        return loss.sqrt()
+
+        if loss.size(-1) == self.class_weights.size(0):
+            loss = (loss * self.class_weights.unsqueeze(0)).sum(-1)
+
+        return loss.mean()

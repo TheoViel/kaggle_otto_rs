@@ -56,6 +56,7 @@ def load_parquets_cudf_chunks(regex, pos_ratio=0, target="", n_chunks=3):
         df = cudf.concat(df, ignore_index=True)
     
         if target:
+            df['gt_*'] = df[['gt_carts', "gt_clicks", "gt_orders"]].max(axis=1)
             pos = df.index[df[target] == 1]
 
             if pos_ratio:
@@ -64,7 +65,8 @@ def load_parquets_cudf_chunks(regex, pos_ratio=0, target="", n_chunks=3):
                 df = df.iloc[cudf.concat([pos, neg])]
             else:  # only positives
                 df = df.iloc[pos]
-        dfs.append(df)
+#         dfs.append(df)
+        dfs.append(df.drop('gt_*', axis=1))
 
     return cudf.concat(dfs, ignore_index=True)
 

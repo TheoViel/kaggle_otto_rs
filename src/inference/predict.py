@@ -1,41 +1,42 @@
 import torch
 import numpy as np
 from torch.utils.data import DataLoader
-from tqdm.notebook import tqdm  # noqa
 
 from params import NUM_WORKERS
-from training.optim import trim_tensors
 
 
-def predict(model, dataset, data_config, activation="softmax"):
+def predict(model, dataset, loss_config, batch_size=64, device="cuda"):
     """
-    Usual predict torch function
+    Torch predict function.
+    Args:
+        model (torch model): Model to predict with.
+        dataset (CustomDataset): Dataset to predict on.
+        loss_config (dict): Loss config, used for activation functions.
+        batch_size (int, optional): Batch size. Defaults to 64.
+        device (str, optional): Device for torch. Defaults to "cuda".
+    Returns:
+        numpy array [len(dataset) x num_classes]: Predictions.
     """
     model.eval()
+    preds = np.empty((0,  model.num_classes))
+    preds_aux = []
 
     loader = DataLoader(
-        dataset,
-        batch_size=data_config["val_bs"],
-        shuffle=False,
-        num_workers=NUM_WORKERS,
-        pin_memory=True,
+        dataset, batch_size=batch_size, shuffle=False, num_workers=2
     )
 
-    preds = []
     with torch.no_grad():
-        for data in loader:
-            ids, token_type_ids = trim_tensors(
-                [data["ids"], data["token_type_ids"]],
-                pad_token=data_config["pad_token"],
-            )
+        for batch in loader:
+            x = batch[0].to(device)
 
-            y_pred = model(ids.cuda(), token_type_ids.cuda())
+            # Forward
+            pred = model(x)
 
-            if activation == "sigmoid":
-                y_pred = y_pred.sigmoid()
-            elif activation == "softmax":
-                y_pred = y_pred.softmax(-1)
+            # Get probabilities
+            if loss_config['activation'] == "sigmoid":
+                pred = pred.sigmoid()
+            elif loss_config['activation'] == "softmax":
+                pred = pred.softmax(-1)
+            preds = np.concatenate([preds, pred.cpu().numpy()])
 
-            preds.append(y_pred.detach().cpu().numpy())
-
-    return np.concatenate(preds)
+    return preds

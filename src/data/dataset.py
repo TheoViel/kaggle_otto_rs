@@ -6,6 +6,19 @@ from torch.utils.data import Dataset
 from params import N_IDS, NUM_CLASSES, CLASSES, CLS_TOKEN
 
 
+class FeaturesDataset(Dataset):
+    def __init__(self, df, target, features):
+        self.df = df
+        self.features = df[features].values
+        self.targets = df[target].values if target is not None else np.zeros(len(df))
+
+    def __getitem__(self, idx):
+        return self.features[idx], self.targets[idx]
+
+    def __len__(self):
+        return len(self.df)
+
+
 class OttoDataset(Dataset):
     def __init__(self, df, max_len=100, max_trunc=20, train=True, test=False):
         self.df = df
