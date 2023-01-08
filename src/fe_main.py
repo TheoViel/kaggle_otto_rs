@@ -139,6 +139,15 @@ def main(mode="train"):
 
         pairs = pairs.merge(sessions_fts, on="session", how="left")
         pairs = pairs.sort_values(['session', 'candidates'])
+        
+        # dtypes not handled by merlin dataloader
+        for c in pairs.columns:
+            if pairs[c].dtype == "uint16":
+                pairs[c] = pairs[c].astype('int16')
+            elif pairs[c].dtype == "uint32":
+                pairs[c] = pairs[c].astype('int32')
+            else:
+                continue
 
         save_by_chunks(pairs, f"../output/features/fts_{MODE}_{SUFFIX}/", part=PART)
         

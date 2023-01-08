@@ -2,7 +2,8 @@ import gc
 import time
 import torch
 import numpy as np
-from sklearn.metrics import roc_auc_score, accuracy_score
+from merlin.loader.torch import Loader
+from sklearn.metrics import roc_auc_score
 from transformers import get_linear_schedule_with_warmup
 
 from training.losses import ClsLoss
@@ -11,16 +12,19 @@ from training.optim import define_optimizer
 from params import WEIGHTS
 
 
-def evaluate(model, val_loader, loss_config, loss_fct, use_fp16=False):
+def evaluate(model, val_loader, data_config, loss_config, loss_fct, use_fp16=False):
     model.eval()
     avg_val_loss = 0.0
-    preds, preds_aux = [], []
+    preds, preds_aux, tgts = [], [], []
 
     with torch.no_grad():
-        for x, y in val_loader:
+        for x, _ in val_loader:
+            y = torch.cat([x[k] for k in data_config['target']], 1)
+            x = torch.cat([x[k] for k in data_config['features']], 1)
+
             with torch.cuda.amp.autocast(enabled=use_fp16):
-                y_pred = model(x.cuda())
-                loss = loss_fct(y_pred.detach(), y.cuda())
+                y_pred = model(x)
+                loss = loss_fct(y_pred.detach(), y)
 
             avg_val_loss += loss / len(val_loader)
 
@@ -30,7 +34,8 @@ def evaluate(model, val_loader, loss_config, loss_fct, use_fp16=False):
                 y_pred = y_pred.softmax(-1)
 
             preds.append(y_pred.detach().cpu().numpy())
-    return np.concatenate(preds), avg_val_loss
+            tgts.append(y.detach().cpu().numpy())
+    return np.concatenate(preds), np.concatenate(tgts), avg_val_loss
 
 
 def fit(
@@ -64,14 +69,8 @@ def fit(
 
     loss_fct = ClsLoss(loss_config)
 
-    train_loader, val_loader = define_loaders(
-        train_dataset,
-        val_dataset,
-        batch_size=data_config["batch_size"],
-        val_bs=data_config["val_bs"],
-        use_weighted_sampler=data_config["use_weighted_sampler"],
-        use_balanced_sampler=data_config["use_balanced_sampler"],
-    )
+    train_loader = Loader(train_dataset, batch_size=data_config["batch_size"], shuffle=True)
+    val_loader = Loader(val_dataset, batch_size=data_config["val_bs"], shuffle=False)
 
     # LR Scheduler
     num_training_steps = epochs * len(train_loader)
@@ -86,10 +85,13 @@ def fit(
     avg_losses, aucs = [], []
     start_time = time.time()
     for epoch in range(1, epochs + 1):
-        for x, y in train_loader:
+        for x, _ in train_loader:
+            y = torch.cat([x[k] for k in data_config['target']], 1)
+            x = torch.cat([x[k] for k in data_config['features']], 1)
+
             with torch.cuda.amp.autocast(enabled=use_fp16):
-                y_pred = model(x.cuda())
-                loss = loss_fct(y_pred, y.cuda())
+                y_pred = model(x)
+                loss = loss_fct(y_pred, y)
 
             scaler.scale(loss).backward()
             avg_losses.append(loss.detach().cpu())
@@ -111,17 +113,17 @@ def fit(
                     continue
 
                 if val_loader is not None:
-                    preds, avg_val_loss = evaluate(
-                        model, val_loader, loss_config, loss_fct, use_fp16=use_fp16
+                    preds, tgts, avg_val_loss = evaluate(
+                        model, val_loader, data_config, loss_config, loss_fct, use_fp16=use_fp16
                     )
-                    aucs = [roc_auc_score(val_dataset.targets[:, i], preds[:, i]) for i in range(preds.shape[-1])]
+                    aucs = [roc_auc_score(tgts[:, i], preds[:, i]) for i in range(preds.shape[-1])]
                     auc = np.average(aucs, weights=WEIGHTS)
 
                 dt = time.time() - start_time
                 lr = scheduler.get_last_lr()[0]
 
-                s = f"Epoch {epoch:02d}/{epochs:02d} (step {step:04d}) \t"
-                s = s + f"lr={lr:.1e} \t t={dt:.0f}s \t loss={np.mean(avg_losses):.3f}"
+                s = f"Epoch {epoch:02d}/{epochs:02d} (step {step:04d})\t"
+                s = s + f"lr={lr:.1e}\t t={dt:.0f}s \t loss={np.mean(avg_losses):.3f}"
                 s = s + f"\t val_loss={avg_val_loss:.3f}" if avg_val_loss else s
                 s = s + f"\t auc={auc:.4f}  " if auc else s
                 s = s + f"{tuple(list(np.round(aucs, 3)))}" if len(aucs) else s
@@ -136,6 +138,11 @@ def fit(
                 start_time = time.time()
                 avg_losses = []
                 model.train()
+
+        del (x, y_pred, loss, y)
+        torch.cuda.empty_cache()
+        gc.collect()
+                
 
     del (train_loader, val_loader, optimizer)
     torch.cuda.empty_cache()
