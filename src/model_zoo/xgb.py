@@ -8,7 +8,8 @@ import xgboost as xgb
 
 from tqdm import tqdm
 from sklearn.metrics import roc_auc_score
-from utils.load import load_parquets_cudf
+from utils.load import load_parquets_cudf, load_parquets_cudf_chunks_folds
+
 
 def objective_xgb(trial, df_train, df_val, features, target="match"):
     xgb_params = dict(
@@ -90,13 +91,20 @@ def train_xgb(
     params=None,
     cat_features=[],  # TODO
     use_es=0,
-    num_boost_round=10000
+    num_boost_round=10000,
+    folds_file="",
+    fold=0
 ):
     iter_train = IterLoadForDMatrix(df_train, features, target)
     dtrain = xgb.DeviceQuantileDMatrix(iter_train, max_bin=256)
 
     if use_es:
-        df_es = load_parquets_cudf(val_regex, max_n=5)
+        if not folds_file:
+            df_es = load_parquets_cudf(val_regex, max_n=5)
+        else:
+            df_es = load_parquets_cudf_chunks_folds(
+                val_regex, folds_file, fold=fold, n_chunks=5, max_n=1, val_only=True
+            )
         dval = xgb.DMatrix(data=df_es[features], label=df_es[target])
         del df_es
 
@@ -120,18 +128,28 @@ def train_xgb(
     numba.cuda.current_context().deallocations.clear()
     gc.collect()
 
-    pred_val = predict_batched(model, val_regex, features)
+    pred_val = predict_batched_xgb(
+        model, val_regex, features, folds_file=folds_file, fold=fold
+    )
 
     return pred_val, model
 
 
-def predict_batched(model, dfs_regex, features):
+def predict_batched_xgb(model, dfs_regex, features, folds_file="", fold=0):
     print('\n[Infering]')
     cols = ['session', 'candidates', 'gt_clicks', 'gt_carts', 'gt_orders', 'pred']
 
+    if folds_file:
+        folds = cudf.read_csv(folds_file)
+            
     dfs = []
     for path in tqdm(glob.glob(dfs_regex)):
         dfg = cudf.read_parquet(path)
+        
+        if folds_file:
+            dfg = dfg.merge(folds, on="session", how="left")
+            dfg = dfg[dfg['fold'] == fold]
+
         dval = xgb.DMatrix(data=dfg[features])
 
         dfg['pred'] = model.predict(dval)
