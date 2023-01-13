@@ -87,28 +87,22 @@ def load_sessions(regexes):
             chunk = cudf.read_parquet(chunk_file)
             chunk.ts = (chunk.ts / 1000).astype("int32")
             chunk["type"] = chunk["type"].map(TYPE_LABELS).astype("int8")
+            chunk[['session', 'aid']] = chunk[['session', 'aid']].astype("float32")
             dfs.append(chunk)
     
     return cudf.concat(dfs).sort_values(['session', 'aid']).reset_index(drop=True)
 
 
-def load_parquets_cudf_chunks_folds(regex, folds_file, fold=0, pos_ratio=0, target="", n_chunks=5, val_only=False, max_n=0, train_only=False):
-    files = sorted(glob.glob(regex))
-    n = int(np.ceil(len(files) / n_chunks))
-    chunks = [files[c: c + n] for c in range(0, len(files), n)]
-    
+def load_parquets_cudf_folds(regex, folds_file, fold=0, pos_ratio=0, target="", val_only=False, max_n=0, train_only=False, use_gt=False, columns=None):
+    files = sorted(glob.glob(regex))    
     folds = cudf.read_csv(folds_file)
 
     dfs, dfs_val = [], []
-    for idx, chunk in enumerate(tqdm(chunks)):
+    for idx, file in enumerate(tqdm(files, disable=max_n>0)):
 
-        df = []
-        for file in chunk:
-            df.append(cudf.read_parquet(file))
-        df = cudf.concat(df, ignore_index=True)
-        
+        df = cudf.read_parquet(file, columns=columns)
         df = df.merge(folds, on="session", how="left")
-        
+
         df_val = df[df['fold'] == fold].reset_index(drop=True)
         df = df[df['fold'] != fold].reset_index(drop=True)
         
@@ -122,22 +116,34 @@ def load_parquets_cudf_chunks_folds(regex, folds_file, fold=0, pos_ratio=0, targ
     
         if target:  # Subsample
             df['gt_*'] = df[['gt_carts', "gt_clicks", "gt_orders"]].max(axis=1)
-            pos = df.index[df[target] == 1]
+            
+            if use_gt:
+                gt = cudf.read_parquet("../output/val_labels.parquet")
+                kept_sessions = gt[gt['type'] == target[3:]].drop('ground_truth', axis=1)
+                df = df.merge(kept_sessions, on="session").dropna(0).drop('type', axis=1)
 
-            if pos_ratio:
+            pos = df.index[df[target] == 1]
+            
+            if pos_ratio > 0:
                 n_neg = int(df[target].sum() / pos_ratio)
                 neg = df[[target]][df[target] == 0].sample(n_neg).index
                 df = df.iloc[cudf.concat([pos, neg])]
-            else:  # only positives
+            elif pos_ratio == -1:  # only positives
                 df = df.iloc[pos]
+            else:
+                pass
 
-            dfs.append(df.drop('gt_*', axis=1))
+            dfs.append(df.drop('gt_*', axis=1).to_pandas())
         else:
-            dfs.append(df)
-        
+            dfs.append(df.to_pandas())
+
+        if max_n and (idx + 1) >= max_n:
+            break
+
     if val_only:
         return cudf.concat(dfs_val, ignore_index=True)
     elif train_only:
-        return cudf.concat(dfs, ignore_index=True)
+        return pd.concat(dfs, ignore_index=True)
+#         return cudf.concat(dfs, ignore_index=True)
 
     return cudf.concat(dfs, ignore_index=True), cudf.concat(dfs_val, ignore_index=True)

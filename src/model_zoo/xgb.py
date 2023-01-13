@@ -8,7 +8,7 @@ import xgboost as xgb
 
 from tqdm import tqdm
 from sklearn.metrics import roc_auc_score
-from utils.load import load_parquets_cudf, load_parquets_cudf_chunks_folds
+from utils.load import load_parquets_cudf, load_parquets_cudf_folds
 
 
 def objective_xgb(trial, df_train, df_val, features, target="match"):
@@ -93,7 +93,8 @@ def train_xgb(
     use_es=0,
     num_boost_round=10000,
     folds_file="",
-    fold=0
+    fold=0,
+    debug=False
 ):
     iter_train = IterLoadForDMatrix(df_train, features, target)
     dtrain = xgb.DeviceQuantileDMatrix(iter_train, max_bin=256)
@@ -102,8 +103,13 @@ def train_xgb(
         if not folds_file:
             df_es = load_parquets_cudf(val_regex, max_n=5)
         else:
-            df_es = load_parquets_cudf_chunks_folds(
-                val_regex, folds_file, fold=fold, n_chunks=5, max_n=1, val_only=True
+            df_es = load_parquets_cudf_folds(
+                val_regex,
+                folds_file,
+                fold=fold,
+                max_n=10,
+                val_only=True,
+                columns=['session','candidates','gt_clicks','gt_carts','gt_orders'] + features,
             )
         dval = xgb.DMatrix(data=df_es[features], label=df_es[target])
         del df_es
@@ -129,13 +135,13 @@ def train_xgb(
     gc.collect()
 
     pred_val = predict_batched_xgb(
-        model, val_regex, features, folds_file=folds_file, fold=fold
+        model, val_regex, features, folds_file=folds_file, fold=fold, debug=debug
     )
 
     return pred_val, model
 
 
-def predict_batched_xgb(model, dfs_regex, features, folds_file="", fold=0):
+def predict_batched_xgb(model, dfs_regex, features, folds_file="", fold=0, test=False, debug=False):
     print('\n[Infering]')
     cols = ['session', 'candidates', 'gt_clicks', 'gt_carts', 'gt_orders', 'pred']
 
@@ -144,7 +150,7 @@ def predict_batched_xgb(model, dfs_regex, features, folds_file="", fold=0):
             
     dfs = []
     for path in tqdm(glob.glob(dfs_regex)):
-        dfg = cudf.read_parquet(path)
+        dfg = cudf.read_parquet(path, columns=features + (cols[:2] if test else cols[:5]))
         
         if folds_file:
             dfg = dfg.merge(folds, on="session", how="left")
@@ -158,6 +164,9 @@ def predict_batched_xgb(model, dfs_regex, features, folds_file="", fold=0):
         del dval, dfg
         numba.cuda.current_context().deallocations.clear()
         gc.collect()
+        
+        if debug:
+            break
 
     results = cudf.concat(dfs, ignore_index=True).sort_values(['session', 'candidates'])
     return results

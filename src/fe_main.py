@@ -7,18 +7,17 @@ import numba
 import argparse
 import numpy as np
 import pandas as pd
-from tqdm import tqdm
 
 from params import *
 from data.fe import *
 from utils.load import load_sessions
 
 
-def main(mode="train"):
+def main(mode="val"):
     # Params
     MODE = mode
-    CANDIDATES_VERSION = "v3"
-    FEATURES_VERSION = "5"
+    CANDIDATES_VERSION = "c-orders-v3"
+    FEATURES_VERSION = "7"
 
     SUFFIX = f"{CANDIDATES_VERSION}.{FEATURES_VERSION}"
     CANDIDATE_FILE = f'../output/candidates/candidates_{CANDIDATES_VERSION}_{MODE}.parquet'
@@ -34,13 +33,32 @@ def main(mode="train"):
         raise NotImplementedError
         
     MATRIX_FOLDER = "../output/matrices/"
-    MATRIX_NAMES = [f"matrix_123_temporal_20_{MODE}", f"matrix_123_type136_20_{MODE}", f"matrix_12__20_{MODE}", f"matrix_123_type0.590.5_20_{MODE}"]
-
+    MATRIX_NAMES = [
+        f"matrix_123_temporal_20_{MODE}",
+        f"matrix_123_type136_20_{MODE}",
+        f"matrix_12__20_{MODE}",
+        f"matrix_123_type0.590.5_20_{MODE}",
+        f"matrix_cpu-90_{MODE}",
+        f"matrix_cpu-95_{MODE}",
+        f"matrix_cpu-99_{MODE}",
+        f"matrix_gpu-116_{MODE}",
+        f"matrix_gpu-115_{MODE}",
+        f"matrix_gpu-93_{MODE}",
+        f"matrix_gpu-217_{MODE}",
+#         f"matrix_gpu-220_{MODE}",
+        f"matrix_gpu-226_{MODE}",
+        f"matrix_gpu-232_{MODE}",
+#         f"matrix_gpu-235_{MODE}",
+        f"matrix_gpu-239_{MODE}",
+        f"matrix_gpu-700_{MODE}",
+        f"matrix_gpu-701_{MODE}",
+    ]
+    
     # Chunks
     pairs = cudf.read_parquet(CANDIDATE_FILE)
     pairs = pairs.sort_values(['session', 'candidates']).reset_index(drop=True)
-    
-    CHUNK_SIZE = 25_000_000
+
+    CHUNK_SIZE = 1_000_000
     N_PARTS = int(np.ceil(len(pairs) / CHUNK_SIZE))
     
     # FE loop
@@ -54,6 +72,10 @@ def main(mode="train"):
         ids = np.arange(PART * CHUNK_SIZE, min((PART + 1) * CHUNK_SIZE, len(pairs)))
         pairs = pairs.iloc[ids].reset_index(drop=True)
 
+        # Popularity
+        pairs = compute_popularity_features(pairs, [OLD_PARQUET_FILES, PARQUET_FILES], "")
+#         pairs = compute_popularity_features(pairs, OLD_PARQUET_FILES, "_old")
+        pairs = compute_popularity_features(pairs, PARQUET_FILES, "_w")
 
         # Time weighting
         sessions = load_sessions(PARQUET_FILES)
@@ -68,11 +90,6 @@ def main(mode="train"):
         del sessions
         numba.cuda.current_context().deallocations.clear()
         gc.collect()
-
-        # Popularity
-        pairs = compute_popularity_features(pairs, [OLD_PARQUET_FILES, PARQUET_FILES], "")
-        pairs = compute_popularity_features(pairs, OLD_PARQUET_FILES, "_old")
-        pairs = compute_popularity_features(pairs, PARQUET_FILES, "_w")
 
         # Covisitation features
         sessions = load_sessions(PARQUET_FILES)
@@ -155,7 +172,8 @@ def main(mode="train"):
         numba.cuda.current_context().deallocations.clear()
         gc.collect()
 
-        
+#         break
+
         
 def parse_args():
     """
@@ -166,7 +184,7 @@ def parse_args():
     parser.add_argument(
         "--mode",
         type=str,
-        default="train",
+        default="val",
         help="Mode",
     )
 
@@ -176,7 +194,7 @@ def parse_args():
 if __name__ == "__main__":
     args = parse_args()
     
-    assert args.mode in ["train", "val", "test"]
+    assert args.mode in ["val", "test"]
 
     main(args.mode)
     
