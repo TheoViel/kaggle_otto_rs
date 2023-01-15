@@ -13,20 +13,25 @@ from data.fe import *
 from utils.load import load_sessions
 
 
-def main(mode="val"):
+def main(mode="val", gt=False):
     # Params
     MODE = mode
-    CANDIDATES_VERSION = "c-orders-v3"
+    CANDIDATES_VERSION = "c-orders-v4"
     FEATURES_VERSION = "7"
 
     SUFFIX = f"{CANDIDATES_VERSION}.{FEATURES_VERSION}"
     CANDIDATE_FILE = f'../output/candidates/candidates_{CANDIDATES_VERSION}_{MODE}.parquet'
     PARQUET_FILES = f"../output/{MODE}_parquet/*"
+    
+    if gt:
+        MODE = "val"
+        CANDIDATE_FILE = f'../output/candidates/candidates_gt.parquet'
+        SUFFIX = f"gt.{FEATURES_VERSION}"
+        
+    print(f'\n -> Generating candidates {SUFFIX} \n\n')
 
     if MODE == "val":
         OLD_PARQUET_FILES = "../output/full_train_parquet/*"
-    elif MODE == "train":
-        OLD_PARQUET_FILES = "../output/other_parquet/*"
     elif MODE == "test":
         OLD_PARQUET_FILES = "../output/full_train_val_parquet/*"
     else:
@@ -58,7 +63,7 @@ def main(mode="val"):
     pairs = cudf.read_parquet(CANDIDATE_FILE)
     pairs = pairs.sort_values(['session', 'candidates']).reset_index(drop=True)
 
-    CHUNK_SIZE = 1_000_000
+    CHUNK_SIZE = 2_000_000
     N_PARTS = int(np.ceil(len(pairs) / CHUNK_SIZE))
     
     # FE loop
@@ -99,7 +104,7 @@ def main(mode="val"):
         pairs = pairs.sort_values(['session', 'candidates']).reset_index(drop=True)
 
         for name in MATRIX_NAMES:
-            print(f' -> Features from {name}')
+            print(f'-> Features from {name}')
 
             fts = compute_coocurence_features(
                 pairs[['session', 'candidates', 'aid']],
@@ -188,6 +193,12 @@ def parse_args():
         help="Mode",
     )
 
+    parser.add_argument(
+        "--gt",
+        default=False,
+        action='store_true',
+        help="Generate gt features",
+    )
     return parser.parse_args()
 
 
@@ -196,6 +207,6 @@ if __name__ == "__main__":
     
     assert args.mode in ["val", "test"]
 
-    main(args.mode)
-    
+    main(args.mode, args.gt)
+
     print('\n\nDone !')

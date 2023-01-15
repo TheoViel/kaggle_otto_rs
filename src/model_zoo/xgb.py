@@ -124,7 +124,7 @@ def train_xgb(
         dtrain=dtrain,
         evals=[(dval, "val")] if use_es else None,
         num_boost_round=num_boost_round,
-        early_stopping_rounds=100 if use_es else None,
+        early_stopping_rounds=200 if use_es else None,
         verbose_eval=100 if use_es else None,
     )
     

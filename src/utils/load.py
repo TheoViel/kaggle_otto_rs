@@ -103,12 +103,12 @@ def load_parquets_cudf_folds(regex, folds_file, fold=0, pos_ratio=0, target="", 
         df = cudf.read_parquet(file, columns=columns)
         df = df.merge(folds, on="session", how="left")
 
-        df_val = df[df['fold'] == fold].reset_index(drop=True)
-        df = df[df['fold'] != fold].reset_index(drop=True)
-        
         if not train_only:
-             dfs_val.append(df_val)
-        
+            df_val = df[df['fold'] == fold].reset_index(drop=True)
+            dfs_val.append(df_val)
+
+        df = df[df['fold'] != fold].reset_index(drop=True)
+
         if val_only:
             if max_n and (idx + 1) >= max_n:
                 break
@@ -120,14 +120,17 @@ def load_parquets_cudf_folds(regex, folds_file, fold=0, pos_ratio=0, target="", 
             if use_gt:
                 gt = cudf.read_parquet("../output/val_labels.parquet")
                 kept_sessions = gt[gt['type'] == target[3:]].drop('ground_truth', axis=1)
-                df = df.merge(kept_sessions, on="session").dropna(0).drop('type', axis=1)
+                df = df.merge(kept_sessions, on="session", how="left").dropna(0).drop('type', axis=1).reset_index(drop=True)
 
             pos = df.index[df[target] == 1]
             
             if pos_ratio > 0:
-                n_neg = int(df[target].sum() / pos_ratio)
-                neg = df[[target]][df[target] == 0].sample(n_neg).index
-                df = df.iloc[cudf.concat([pos, neg])]
+                try:
+                    n_neg = int(df[target].sum() / pos_ratio)
+                    neg = df[[target]][df[target] == 0].sample(n_neg).index
+                    df = df.iloc[cudf.concat([pos, neg])]
+                except:
+                    pass
             elif pos_ratio == -1:  # only positives
                 df = df.iloc[pos]
             else:
