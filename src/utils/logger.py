@@ -91,7 +91,10 @@ def save_config(config, path):
         pandas dataframe: Config as a dataframe.
     """
     dic = config.__dict__.copy()
-    del (dic["__doc__"], dic["__module__"], dic["__dict__"], dic["__weakref__"])
+    try:
+        del (dic["__doc__"], dic["__module__"], dic["__dict__"], dic["__weakref__"])
+    except KeyError:
+        pass
 
     if not path.endswith(".json"):
         path += ".json"
