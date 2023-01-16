@@ -2,6 +2,7 @@ import gc
 import time
 import torch
 import numpy as np
+from tqdm import tqdm
 from merlin.loader.torch import Loader
 from sklearn.metrics import roc_auc_score
 from transformers import get_linear_schedule_with_warmup

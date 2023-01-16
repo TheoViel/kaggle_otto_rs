@@ -1,5 +1,8 @@
+import gc
+import os
 import glob
 import cudf
+import numba
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
@@ -150,3 +153,63 @@ def load_parquets_cudf_folds(regex, folds_file, fold=0, pos_ratio=0, target="", 
 #         return cudf.concat(dfs, ignore_index=True)
 
     return cudf.concat(dfs, ignore_index=True), cudf.concat(dfs_val, ignore_index=True)
+
+
+def prepare_train_val_data(regex, folds_file, pos_ratio=0, target="", train_only=False, use_gt=False, columns=None, save_folder=""):
+    files = sorted(glob.glob(regex))    
+    folds = cudf.read_csv(folds_file)
+    n_folds = int(folds['fold'].max()) + 1
+
+    for idx, file in enumerate(tqdm(files)):
+        df = cudf.read_parquet(file, columns=columns)
+        df = df.merge(folds, on="session", how="left")
+        
+        for fold in range(n_folds):
+            os.makedirs(save_folder + f"{fold}", exist_ok=True)
+            os.makedirs(save_folder + f"{fold}/train/", exist_ok=True)
+            os.makedirs(save_folder + f"{fold}/val/", exist_ok=True)
+
+            if not train_only:
+                df_val = df[df['fold'] == fold].reset_index(drop=True)
+
+            df_train = df[df['fold'] != fold].reset_index(drop=True)
+
+            if target:  # Subsample
+                df_train['gt_*'] = df_train[['gt_carts', "gt_clicks", "gt_orders"]].max(axis=1)
+
+                if use_gt:
+                    gt = cudf.read_parquet("../output/val_labels.parquet")
+                    kept_sessions = gt[gt['type'] == target[3:]].drop('ground_truth', axis=1)
+                    df_train = df_train.merge(kept_sessions, on="session", how="left").dropna(0).drop('type', axis=1).reset_index(drop=True)
+
+                pos = df_train.index[df_train[target] == 1]
+
+                if pos_ratio > 0:
+                    try:
+                        n_neg = int(df_train[target].sum() / pos_ratio)
+                        neg = df_train[[target]][df_train[target] == 0].sample(n_neg).index
+                        df_train = df_train.iloc[cudf.concat([pos, neg])]
+                    except:
+                        pass
+                elif pos_ratio == -1:  # only positives
+                    df_train = df_train.iloc[pos]
+                else:
+                    pass
+
+                df_train.drop('gt_*', axis=1, inplace=True)
+                
+            if not train_only:
+                df_val.to_parquet(save_folder + f"{fold}/val/" + file.split('/')[-1])
+                del df_val
+
+            df_train.to_parquet(save_folder + f"{fold}/train/" + file.split('/')[-1])
+            
+            del df_train
+            numba.cuda.current_context().deallocations.clear()
+            gc.collect()
+            
+            break
+            
+        del df
+        numba.cuda.current_context().deallocations.clear()
+        gc.collect()

@@ -1,12 +1,13 @@
 import torch
 import numpy as np
+from tqdm import tqdm
 from merlin.loader.torch import Loader
 from torch.utils.data import DataLoader
 
 from params import NUM_WORKERS
 
 
-def predict(model, dataset, loss_config, batch_size=64, device="cuda"):
+def predict_(model, dataset, loss_config, batch_size=64, device="cuda"):
     """
     Torch predict function.
     Args:
@@ -63,7 +64,7 @@ def predict(model, dataset, loss_config, data_config, device="cuda"):
     loader = Loader(dataset, batch_size=data_config["val_bs"], shuffle=False)
 
     with torch.no_grad():
-        for x, _ in loader:
+        for x, _ in tqdm(loader):
             y = torch.cat([x[k] for k in cols if k in x.keys()], 1)
             x = torch.cat([x[k] for k in data_config['features']], 1)
 

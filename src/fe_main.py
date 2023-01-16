@@ -7,6 +7,7 @@ import numba
 import argparse
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 
 from params import *
 from data.fe import *
@@ -17,7 +18,7 @@ def main(mode="val", gt=False):
     # Params
     MODE = mode
     CANDIDATES_VERSION = "c-orders-v4"
-    FEATURES_VERSION = "7"
+    FEATURES_VERSION = "8"
 
     SUFFIX = f"{CANDIDATES_VERSION}.{FEATURES_VERSION}"
     CANDIDATE_FILE = f'../output/candidates/candidates_{CANDIDATES_VERSION}_{MODE}.parquet'
@@ -28,7 +29,7 @@ def main(mode="val", gt=False):
         CANDIDATE_FILE = f'../output/candidates/candidates_gt.parquet'
         SUFFIX = f"gt.{FEATURES_VERSION}"
         
-    print(f'\n -> Generating candidates {SUFFIX} \n\n')
+    print(f'\n -> Generating features {SUFFIX} \n\n')
 
     if MODE == "val":
         OLD_PARQUET_FILES = "../output/full_train_parquet/*"
@@ -60,26 +61,27 @@ def main(mode="val", gt=False):
     ]
     
     # Chunks
-    pairs = cudf.read_parquet(CANDIDATE_FILE)
-    pairs = pairs.sort_values(['session', 'candidates']).reset_index(drop=True)
+    CHUNK_SIZE = 1_000_000
 
-    CHUNK_SIZE = 2_000_000
-    N_PARTS = int(np.ceil(len(pairs) / CHUNK_SIZE))
+    all_pairs = cudf.read_parquet(CANDIDATE_FILE)
+    all_pairs = all_pairs.sort_values(['session', 'candidates']).reset_index(drop=True)
     
+    all_pairs['group'] = all_pairs['session'] // (CHUNK_SIZE // 50)
+    N_PARTS = len(all_pairs['group'].unique())
+    
+    all_pairs = all_pairs.to_pandas()
+    numba.cuda.current_context().deallocations.clear()
+    gc.collect()
+
     # FE loop
-    for PART in range(N_PARTS):
+    for PART, (_, pairs) in enumerate(all_pairs.groupby('group')):
         print(f"\n---------   PART {PART + 1 } / {N_PARTS}   ---------\n")
 
-        # Subsample
-        pairs = cudf.read_parquet(CANDIDATE_FILE)
-        pairs = pairs.sort_values(['session', 'candidates']).reset_index(drop=True)
-        
-        ids = np.arange(PART * CHUNK_SIZE, min((PART + 1) * CHUNK_SIZE, len(pairs)))
-        pairs = pairs.iloc[ids].reset_index(drop=True)
+        pairs.drop('group', axis=1, inplace=True)
+        pairs = cudf.from_pandas(pairs).sort_values(['session', 'candidates']).reset_index(drop=True)
 
         # Popularity
         pairs = compute_popularity_features(pairs, [OLD_PARQUET_FILES, PARQUET_FILES], "")
-#         pairs = compute_popularity_features(pairs, OLD_PARQUET_FILES, "_old")
         pairs = compute_popularity_features(pairs, PARQUET_FILES, "_w")
 
         # Time weighting
@@ -124,6 +126,13 @@ def main(mode="val", gt=False):
         del sessions, weights
         numba.cuda.current_context().deallocations.clear()
         gc.collect()
+        
+        # Rank features
+        fts_to_rank = [ft for ft in pairs.columns[5:] if not any([k in ft for k in ["_rank", "_sum", "_max"]])]
+        print(f'-> Compute {len(fts_to_rank)} rank features')
+
+        for ft in fts_to_rank:
+            add_rank_feature(pairs, ft)
 
         # Session features
         pairs = pairs.sort_values(['session', 'candidates']).reset_index(drop=True)

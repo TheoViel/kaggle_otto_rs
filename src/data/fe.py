@@ -153,7 +153,7 @@ def compute_popularity_features_old(pairs, parquet_files, suffix):
     return pairs
 
 
-def compute_popularity_features(pairs, parquet_files, suffix):
+def compute_popularity_features(pairs, parquet_files, suffix=""):
     sessions = load_sessions(parquet_files)    
     sessions = compute_weights(sessions, return_sessions=True)
     
@@ -178,74 +178,6 @@ def compute_popularity_features(pairs, parquet_files, suffix):
             pairs[c] = pairs[c].astype('float32')
 
     del popularity, sessions
-    numba.cuda.current_context().deallocations.clear()
-    gc.collect()
-
-    return pairs
-
-
-def compute_popularity_features_old_2(pairs, parquet_files, suffix):
-    sessions = load_sessions(parquet_files)
-
-    sessions["w"] = sessions["ts"] - sessions["ts"].min()
-    max_ = sessions["w"].max()
-    sessions["w"] = sessions["w"].apply(
-        lambda x: 2 ** (0.1 + 0.9 * (x - 1) / (max_ - 1)) - 1
-    )
-
-    for i, c in enumerate(CLASSES):
-        print(f"-> Popularity for {c} - {suffix}")
-        popularity = cudf.DataFrame(
-            sessions.loc[sessions["type"] == i, "aid"].value_counts()
-        ).reset_index()
-        popularity.columns = ["candidates", f"{c}_popularity{suffix}"]
-        popularity[f"{c}_popularity{suffix}"] = np.clip(
-            popularity[f"{c}_popularity{suffix}"], 0, 2**31 - 1
-        ).astype("int32")
-
-        pairs = pairs.merge(popularity, how="left", on="candidates").fillna(0)
-
-        popularity_time_weighted = (
-            sessions[sessions["type"] == i][["aid", "w"]]
-            .groupby("aid")
-            .sum()
-            .reset_index()
-        )
-        popularity_time_weighted["w"] = popularity_time_weighted["w"].astype("float32")
-
-        popularity_time_weighted.columns = [
-            "candidates",
-            f"{c}_popularity_log{suffix}",
-        ]
-        pairs = pairs.merge(
-            popularity_time_weighted, how="left", on="candidates"
-        ).fillna(0)
-
-        del popularity, popularity_time_weighted
-        numba.cuda.current_context().deallocations.clear()
-        gc.collect()
-
-    print(f"-> Popularity for views - {suffix}")
-    popularity = cudf.DataFrame(
-        sessions["aid"].value_counts()
-    ).reset_index()
-    popularity.columns = ["candidates", f"views_popularity{suffix}"]
-    popularity[f"views_popularity{suffix}"] = np.clip(
-        popularity[f"views_popularity{suffix}"], 0, 2**31 - 1
-    ).astype("int32")
-
-    pairs = pairs.merge(popularity, how="left", on="candidates").fillna(0)
-
-    popularity_time_weighted = sessions[["aid", "w", "w_log"]].groupby("aid").sum().reset_index()
-    popularity_time_weighted["w"] = popularity_time_weighted["w"].astype("float32")
-    popularity_time_weighted["w_log"] = popularity_time_weighted["w_log"].astype("float32")
-
-    popularity_time_weighted.columns = ["candidates", f"views_popularity_log{suffix}"]
-    pairs = pairs.merge(
-        popularity_time_weighted, how="left", on="candidates"
-    ).fillna(0)
-
-    del popularity, popularity_time_weighted
     numba.cuda.current_context().deallocations.clear()
     gc.collect()
 
@@ -304,6 +236,20 @@ def count_actions(pairs, sessions):
     ft = ft.sort_values(["session", "candidates"])["aid"].values
 
     return np.clip(ft, 0, 255).astype(np.uint8)
+
+
+def add_rank_feature(pairs, feature):
+    df_ft = pairs[["session", "candidates", feature]]
+    df_ft = df_ft.sort_values(feature, ascending=False, ignore_index=True)
+    df_ft[f'{feature}_rank'] = 1
+    df_ft[f'{feature}_rank'] = df_ft[f'{feature}_rank'].astype("uint8")
+    df_ft[f'{feature}_rank'] = df_ft.groupby("session")[f'{feature}_rank'].cumsum()
+
+    df_ft[f'{feature}_rank'] = df_ft.groupby(["session", feature])[f'{feature}_rank'].cummin()  # Ties
+
+    df_ft = df_ft.drop(feature, axis=1).sort_values(["session", "candidates"], ignore_index=True)
+    
+    pairs[f'{feature}_rank'] = df_ft[f'{feature}_rank'].astype("uint8")
 
 
 def save_by_chunks(pairs, folder, part=0):
