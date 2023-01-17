@@ -93,6 +93,8 @@ def train_xgb(
     use_es=0,
     num_boost_round=10000,
     folds_file="",
+    probs_file="",
+    probs_mode="",
     fold=0,
     debug=False
 ):
@@ -109,6 +111,8 @@ def train_xgb(
                 fold=fold,
                 max_n=10,
                 val_only=True,
+                probs_file=probs_file,
+                probs_mode=probs_mode,
                 columns=['session','candidates','gt_clicks','gt_carts','gt_orders'] + features,
             )
         dval = xgb.DMatrix(data=df_es[features], label=df_es[target])
@@ -135,19 +139,33 @@ def train_xgb(
     gc.collect()
 
     pred_val = predict_batched_xgb(
-        model, val_regex, features, folds_file=folds_file, fold=fold, debug=debug
+        model,
+        val_regex,
+        features,
+        folds_file=folds_file,
+        fold=fold,
+        probs_file=probs_file,
+        probs_mode=probs_mode,
+        debug=debug
     )
 
     return pred_val, model
 
 
-def predict_batched_xgb(model, dfs_regex, features, folds_file="", fold=0, test=False, debug=False):
+def predict_batched_xgb(model, dfs_regex, features, folds_file="", fold=0, probs_file="", probs_mode="", test=False, debug=False):
     print('\n[Infering]')
     cols = ['session', 'candidates', 'gt_clicks', 'gt_carts', 'gt_orders', 'pred']
 
     if folds_file:
         folds = cudf.read_csv(folds_file)
             
+    if probs_file:
+        preds = cudf.concat([
+            cudf.read_parquet(f) for f in glob.glob(probs_file + "df_val_*")
+        ], ignore_index=True)
+        preds['pred_rank'] = preds.groupby('session').rank(ascending=False)['pred']
+        assert len(preds)
+        
     dfs = []
     for path in tqdm(glob.glob(dfs_regex)):
         dfg = cudf.read_parquet(path, columns=features + (cols[:2] if test else cols[:5]))
@@ -155,6 +173,13 @@ def predict_batched_xgb(model, dfs_regex, features, folds_file="", fold=0, test=
         if folds_file:
             dfg = dfg.merge(folds, on="session", how="left")
             dfg = dfg[dfg['fold'] == fold]
+    
+        if probs_file:
+            assert "rank" in probs_mode
+            dfg = dfg.merge(preds, how="left", on=["session", "candidates"])
+            max_rank = int(probs_mode.split('_')[1])
+            dfg = dfg[dfg["pred_rank"] <= max_rank]
+            dfg.drop(['pred', 'pred_rank'], axis=1, inplace=True)
 
         dval = xgb.DMatrix(data=dfg[features])
 

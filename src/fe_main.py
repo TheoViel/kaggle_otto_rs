@@ -17,7 +17,8 @@ from utils.load import load_sessions
 def main(mode="val", gt=False):
     # Params
     MODE = mode
-    CANDIDATES_VERSION = "c-orders-v4"
+    CANDIDATES_VERSION = "cv3-tv5"
+#     CANDIDATES_VERSION = "c-orders-v4"
     FEATURES_VERSION = "8"
 
     SUFFIX = f"{CANDIDATES_VERSION}.{FEATURES_VERSION}"
@@ -128,7 +129,8 @@ def main(mode="val", gt=False):
         gc.collect()
         
         # Rank features
-        fts_to_rank = [ft for ft in pairs.columns[5:] if not any([k in ft for k in ["_rank", "_sum", "_max"]])]
+        fts_to_rank = pairs.columns[5:] if MODE == "val" else pairs.columns[2:]
+        fts_to_rank = [ft for ft in fts_to_rank if not any([k in ft for k in ["_rank", "_sum", "_max"]])]
         print(f'-> Compute {len(fts_to_rank)} rank features')
 
         for ft in fts_to_rank:

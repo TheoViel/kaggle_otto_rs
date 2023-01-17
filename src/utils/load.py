@@ -8,7 +8,7 @@ import pandas as pd
 from tqdm import tqdm
 
 from params import TYPE_LABELS
-
+from utils.torch import seed_everything
 
 def load_parquets_pd(regex):
     dfs = []
@@ -96,18 +96,54 @@ def load_sessions(regexes):
     return cudf.concat(dfs).sort_values(['session', 'aid']).reset_index(drop=True)
 
 
-def load_parquets_cudf_folds(regex, folds_file, fold=0, pos_ratio=0, target="", val_only=False, max_n=0, train_only=False, use_gt=False, columns=None):
+def load_parquets_cudf_folds(
+    regex,
+    folds_file,
+    fold=0,
+    pos_ratio=0,
+    target="",
+    val_only=False,
+    max_n=0,
+    train_only=False,
+    use_gt=False,
+    columns=None,
+    probs_file="",
+    probs_mode="",
+    seed=42,
+):
     files = sorted(glob.glob(regex))    
     folds = cudf.read_csv(folds_file)
+
+    if probs_file:
+        preds = cudf.concat([
+            cudf.read_parquet(f) for f in glob.glob(probs_file + "df_val_*")
+        ], ignore_index=True)
+        preds['pred_rank'] = preds.groupby('session').rank(ascending=False)['pred']
+        assert len(preds)
 
     dfs, dfs_val = [], []
     for idx, file in enumerate(tqdm(files, disable=max_n>0)):
 
         df = cudf.read_parquet(file, columns=columns)
         df = df.merge(folds, on="session", how="left")
+        
+        if probs_file:
+            assert "rank" in probs_mode
+            df = df.merge(preds, how="left", on=["session", "candidates"])
+            max_rank = int(probs_mode.split('_')[1])
+            df = df[df["pred_rank"] <= max_rank]
+            df.drop(['pred', 'pred_rank'], axis=1, inplace=True)
 
         if not train_only:
             df_val = df[df['fold'] == fold].reset_index(drop=True)
+            
+#             if probs_file:
+#                 assert "rank" in probs_mode
+#                 df_val = df_val.merge(preds, how="left", on=["session", "candidates"])
+#                 max_rank = int(probs_mode.split('_')[1])
+#                 df_val = df_val[df_val["pred_rank"] <= max_rank]
+#                 df_val.drop(['pred', 'pred_rank'], axis=1, inplace=True)
+                
             dfs_val.append(df_val)
 
         df = df[df['fold'] != fold].reset_index(drop=True)
@@ -116,7 +152,7 @@ def load_parquets_cudf_folds(regex, folds_file, fold=0, pos_ratio=0, target="", 
             if max_n and (idx + 1) >= max_n:
                 break
             continue
-    
+
         if target:  # Subsample
             df['gt_*'] = df[['gt_carts', "gt_clicks", "gt_orders"]].max(axis=1)
             
@@ -125,15 +161,36 @@ def load_parquets_cudf_folds(regex, folds_file, fold=0, pos_ratio=0, target="", 
                 kept_sessions = gt[gt['type'] == target[3:]].drop('ground_truth', axis=1)
                 df = df.merge(kept_sessions, on="session", how="left").dropna(0).drop('type', axis=1).reset_index(drop=True)
 
+            df = df.sort_values(['session', 'candidates'], ignore_index=True)
             pos = df.index[df[target] == 1]
-            
+
+            seed_everything(fold)
             if pos_ratio > 0:
                 try:
                     n_neg = int(df[target].sum() / pos_ratio)
-                    neg = df[[target]][df[target] == 0].sample(n_neg).index
+
+#                     if probs_file:
+#                         df_neg = df[["session", "candidates", target]].merge(preds, how="left", on=["session", "candidates"])
+#                         df_neg = df_neg.sort_values(['session', 'candidates'], ignore_index=True)
+#                         df_neg = df_neg[df_neg[target] == 0]
+
+#                         if probs_mode == "head":
+#                             neg = df_neg.sort_values('pred', ascending=False).head(n_neg).index
+#                         elif "rank" in probs_mode:
+#                             max_rank = int(probs_mode.split('_')[1])
+#                             neg = df_neg[df_neg["pred_rank"] <= max_rank].sample(n_neg, random_state=42).index
+#                         else:  # proba
+#                             p = df_neg['pred'].to_pandas().values
+#                             index = list(df_neg.index.to_pandas())
+#                             neg = np.random.choice(index, n_neg, p=p / p.sum())
+#                             neg = cudf.DataFrame(neg).set_index(0).index
+#                     else:
+                    neg = df[[target]][df[target] == 0].sample(n_neg, random_state=seed).index
+
                     df = df.iloc[cudf.concat([pos, neg])]
                 except:
-                    pass
+                    print('WARNING ! Negative sampling error, using the whole df.')
+
             elif pos_ratio == -1:  # only positives
                 df = df.iloc[pos]
             else:

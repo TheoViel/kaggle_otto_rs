@@ -13,8 +13,6 @@ from utils.load import load_parquets_cudf_folds
 
 
 def train(df_train, val_regex, config, log_folder=None, optimize=False, fold=0, debug=False):
-    seed_everything(config.seed)
-
     txt = f"{'Optimizing' if optimize else 'Training'} {config.model.upper()} Model"
     print(f"\n-------------   {txt}   -------------\n")
 
@@ -40,6 +38,8 @@ def train(df_train, val_regex, config, log_folder=None, optimize=False, fold=0, 
         use_es=config.use_es,
         num_boost_round=config.num_boost_round,
         folds_file=config.folds_file,
+        probs_file=config.probs_file,
+        probs_mode=config.probs_mode,
         fold=fold,
         debug=debug,
     )
@@ -85,6 +85,7 @@ def train(df_train, val_regex, config, log_folder=None, optimize=False, fold=0, 
 
 
 def kfold(regex, test_regex, config, log_folder, debug=False):
+    seed_everything(config.seed)
     dfs_val, ft_imps, dfs_test = [], [], []
     for fold in range(config.k):
         print(f"\n-------------   Fold {fold + 1} / {config.k}  -------------\n")
@@ -99,7 +100,10 @@ def kfold(regex, test_regex, config, log_folder, debug=False):
             use_gt=config.use_gt_sessions,
             train_only=True,
             columns=['session', 'candidates', 'gt_clicks', 'gt_carts', 'gt_orders'] + config.features,
-            max_n=5 if debug else 0
+            max_n=5 if debug else 0,
+            probs_file=config.probs_file if config.restrict_all else "",
+            probs_mode=config.probs_mode if config.restrict_all else "",
+            seed=config.seed,
         )
 
         if config.use_gt_pos:
@@ -132,7 +136,14 @@ def kfold(regex, test_regex, config, log_folder, debug=False):
             return df_val, ft_imp, None
 
         predict_fct = PREDICT_FCTS[config.model]
-        df_test = predict_fct(model, test_regex, config.features, debug=debug)
+        df_test = predict_fct(
+            model,
+            test_regex,
+            config.features,
+            debug=debug,
+            probs_file=config.probs_file if config.restrict_all else "",
+            probs_mode=config.probs_mode if config.restrict_all else "",
+        )
         dfs_test.append(df_test)
         
         print('\n -> Saving predictions \n')
