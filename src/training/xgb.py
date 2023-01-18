@@ -3,26 +3,19 @@ import cuml
 import cudf
 import glob
 import numba
+import optuna
 import pandas as pd
 from sklearn.metrics import roc_auc_score
 from numerize.numerize import numerize
 from utils.torch import seed_everything
 
 from model_zoo import TRAIN_FCTS, PREDICT_FCTS
+from model_zoo.xgb import objective_xgb
 from utils.load import load_parquets_cudf_folds
 
 
-def train(df_train, val_regex, config, log_folder=None, optimize=False, fold=0, debug=False):
-    txt = f"{'Optimizing' if optimize else 'Training'} {config.model.upper()} Model"
-    print(f"\n-------------   {txt}   -------------\n")
-
-    if optimize:  # TODO
-        raise NotImplementedError
-        # study = optuna.create_study(direction="minimize")
-        # objective = lambda x: objective_xgb(x, df_train, val_regex, features, target)
-        # study.optimize(objective, n_trials=50)
-        # print(study.best_params)
-        # return study.best_params
+def train(df_train, val_regex, config, log_folder=None, fold=0, debug=False):
+    print(f"\n-------------  Training {config.model.upper()} Model  -------------\n")
 
     val_candids = sum([len(cudf.read_parquet(f, columns=['gt_orders'])) for f in glob.glob(val_regex)])
     print(f"    -> {numerize(len(df_train))} training candidates")
@@ -42,6 +35,7 @@ def train(df_train, val_regex, config, log_folder=None, optimize=False, fold=0, 
         probs_mode=config.probs_mode,
         fold=fold,
         debug=debug,
+        no_tqdm=log_folder is not None,
     )
 
     # Feature importance
@@ -104,6 +98,7 @@ def kfold(regex, test_regex, config, log_folder, debug=False):
             probs_file=config.probs_file if config.restrict_all else "",
             probs_mode=config.probs_mode if config.restrict_all else "",
             seed=config.seed,
+            no_tqdm=log_folder is not None,
         )
 
         if config.use_gt_pos:
@@ -133,7 +128,7 @@ def kfold(regex, test_regex, config, log_folder, debug=False):
             pass
         
         if log_folder is None:
-            return df_val, ft_imp, None
+            return df_val, ft_imp
 
         predict_fct = PREDICT_FCTS[config.model]
         df_test = predict_fct(
@@ -143,6 +138,8 @@ def kfold(regex, test_regex, config, log_folder, debug=False):
             debug=debug,
             probs_file=config.probs_file if config.restrict_all else "",
             probs_mode=config.probs_mode if config.restrict_all else "",
+            ranker=("rank" in config.params["objective"]),
+            no_tqdm=log_folder is not None,
         )
         dfs_test.append(df_test)
         
@@ -157,12 +154,52 @@ def kfold(regex, test_regex, config, log_folder, debug=False):
         numba.cuda.current_context().deallocations.clear()
         gc.collect()
 
-    dfs_test = cudf.concat(dfs_test).groupby(['session', 'candidates']).mean().reset_index()
     dfs_val =  cudf.concat(dfs_val).sort_values(['session', 'candidates'], ignore_index=True)
-    ft_imps = pd.concat(ft_imps).reset_index().groupby('index').mean()
 
+    ft_imps = pd.concat(ft_imps).reset_index().groupby('index').mean()
     if log_folder is not None:
         ft_imps.to_csv(log_folder + "ft_imp.csv")
-        dfs_test[['session', 'candidates', 'pred']].to_parquet(log_folder + f"df_test.parquet")
 
-    return dfs_val, ft_imps, dfs_test
+    return dfs_val, ft_imps
+
+
+def optimize(regex, config, log_folder, debug=False):
+    seed_everything(config.seed)
+
+    df_train = load_parquets_cudf_folds(
+        regex,
+        config.folds_file,
+        fold=0,
+        pos_ratio=config.pos_ratio,
+        target=config.target,
+        use_gt=False,
+        train_only=True,
+        columns=['session', 'candidates', 'gt_clicks', 'gt_carts', 'gt_orders'] + config.features,
+        max_n=5 if debug else 0,
+        probs_file=config.probs_file if config.restrict_all else "",
+        probs_mode=config.probs_mode if config.restrict_all else "",
+        seed=config.seed,
+        no_tqdm=log_folder is not None
+    )
+
+    study = optuna.create_study(direction="maximize")
+    objective = lambda x: objective_xgb(
+        x,
+        df_train,
+        regex,
+        features=config.features,
+        target=config.target,
+        params=config.params,
+        folds_file=config.folds_file,
+        probs_file=config.probs_file,
+        probs_mode=config.probs_mode,
+        fold=0,
+        debug=debug,
+        no_tqdm=log_folder is not None
+    )
+
+    study.optimize(objective, n_trials=1 if debug else 100)
+
+    print("Final params :\n", study.best_params)
+
+    return study

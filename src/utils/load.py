@@ -90,7 +90,7 @@ def load_sessions(regexes):
             chunk = cudf.read_parquet(chunk_file)
             chunk.ts = (chunk.ts / 1000).astype("int32")
             chunk["type"] = chunk["type"].map(TYPE_LABELS).astype("int8")
-            chunk[['session', 'aid']] = chunk[['session', 'aid']].astype("float32")
+            chunk[['session', 'aid']] = chunk[['session', 'aid']].astype("int32")
             dfs.append(chunk)
     
     return cudf.concat(dfs).sort_values(['session', 'aid']).reset_index(drop=True)
@@ -110,6 +110,7 @@ def load_parquets_cudf_folds(
     probs_file="",
     probs_mode="",
     seed=42,
+    no_tqdm=False,
 ):
     files = sorted(glob.glob(regex))    
     folds = cudf.read_csv(folds_file)
@@ -122,7 +123,7 @@ def load_parquets_cudf_folds(
         assert len(preds)
 
     dfs, dfs_val = [], []
-    for idx, file in enumerate(tqdm(files, disable=max_n>0)):
+    for idx, file in enumerate(tqdm(files, disable=(max_n>0 or no_tqdm))):
 
         df = cudf.read_parquet(file, columns=columns)
         df = df.merge(folds, on="session", how="left")

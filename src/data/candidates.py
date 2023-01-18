@@ -42,12 +42,10 @@ def matrix_to_candids_dict(matrix):
 def create_candidates(df, clicks_candids, type_weighted_candids, max_cooc=100):
     df["clicks_candidates"] = df["aid"].map(clicks_candids)
     df["type_weighted_candidates"] = df["aid"].map(type_weighted_candids)
-    # df["cartbuy_candidates"] = df["aid"].map(cartbuy_candidates)
 
     df["coocurence_candidates"] = (
         df["clicks_candidates"]
-        + df["type_weighted_candidates"]  # +
-        #         df["cartbuy_candidates"]
+        + df["type_weighted_candidates"]
     )
 
     df.drop(["clicks_candidates", "type_weighted_candidates"], axis=1, inplace=True)
@@ -60,14 +58,12 @@ def create_candidates(df, clicks_candids, type_weighted_candids, max_cooc=100):
 
     df["coocurence_candidates"] = df["coocurence_candidates"].parallel_apply(
         lambda x: [aid for aid, _ in Counter(x).most_common(max_cooc)]
-        if len(x) > 20
+        if len(x) > max_cooc
         else x
     )
 
     df["candidates"] = df["aid"] + df["coocurence_candidates"]
     df["candidates"] = df["candidates"].parallel_apply(lambda x: list(set(x)))
-    #     df["candidates"] = df["candidates"].parallel_apply(lambda x: list(set(x + popular)))
-
     df.drop(["coocurence_candidates"], axis=1, inplace=True)
 
     return df

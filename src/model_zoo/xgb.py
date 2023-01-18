@@ -8,60 +8,20 @@ import xgboost as xgb
 
 from tqdm import tqdm
 from sklearn.metrics import roc_auc_score
+
+from utils.metrics import get_coverage
 from utils.load import load_parquets_cudf, load_parquets_cudf_folds
 
 
-def objective_xgb(trial, df_train, df_val, features, target="match"):
-    xgb_params = dict(
-        max_depth=trial.suggest_int("max_depth", 8, 12),
-        # gamma=trial.suggest_float("gamma", 1e-6, 1e-1, log=True),
-        min_child_weight=trial.suggest_int("min_child_weight", 1, 30),
-        colsample_bytree=trial.suggest_float("colsample_bytree", 0.5, 1),
-        subsample=trial.suggest_float("subsample", 0.5, 1),
-        reg_alpha=trial.suggest_float("reg_alpha", 1e-3, 1, log=True),
-        reg_lambda=trial.suggest_float("reg_lambda", 1e-3, 1, log=True),
-    )
-
-    model = XGBClassifier(
-        **xgb_params,
-        n_estimators=10000,
-        learning_rate=0.1,
-        objective="binary:logistic",
-        eval_metric="auc",
-        tree_method="gpu_hist",
-        predictor="gpu_predictor",
-        use_label_encoder=False,
-        random_state=42,
-        enable_categorical=True,
-    )
-
-    model.fit(
-        df_train[features],
-        df_train[target],
-        eval_set=[(df_val[features], df_val[target])],
-        verbose=0,
-        early_stopping_rounds=20,
-    )
-
-    pred = model.predict_proba(df_val[features])[:, 1]
-
-    y_val = (
-        df_val[target].values
-        if isinstance(df_val, pd.DataFrame)
-        else df_val[target].get()
-    )
-
-    return roc_auc_score(y_val, pred)
-
-
 class IterLoadForDMatrix(xgb.core.DataIter):
-    def __init__(self, df=None, features=None, target=None, batch_size=256 * 1024):
+    def __init__(self, df=None, features=None, target=None, batch_size=256 * 1024, ranker=False):
         self.features = features
         self.target = target
         self.df = df
         self.it = 0  # set iterator to 0
         self.batch_size = batch_size
         self.batches = int(np.ceil(len(df) / self.batch_size))
+        self.ranker = ranker
         super().__init__()
 
     def reset(self):
@@ -76,11 +36,126 @@ class IterLoadForDMatrix(xgb.core.DataIter):
         a = self.it * self.batch_size
         b = min((self.it + 1) * self.batch_size, len(self.df))
         dt = cudf.DataFrame(self.df.iloc[a:b])
-        input_data(
-            data=dt[self.features], label=dt[self.target]
-        )  # , weight=dt['weight'])
+    
+        if self.ranker:
+            dt = dt.sort_values('session', ignore_index=True)
+            group = dt[['session', 'candidates']].groupby('session').size().to_pandas().values
+            input_data(data=dt[self.features], label=dt[self.target], group=group)
+        else:
+            input_data(data=dt[self.features], label=dt[self.target])
         self.it += 1
         return 1
+
+    
+def evaluate(df_val, target):
+    preds = df_val[['session', 'candidates', 'pred']].copy()
+    preds = preds.sort_values(['session', 'pred'], ascending=[True, False])
+    preds = preds[['session', 'candidates', 'pred']].groupby('session').agg(list).reset_index()
+    preds = preds.to_pandas()
+    preds['candidates'] = preds['candidates'].apply(lambda x: x[:20])
+    
+    gt = pd.read_parquet("../output/val_labels.parquet")
+    preds = preds.merge(gt[gt["type"] == target[3:]].drop("type", axis=1), how="left").rename(
+        columns={"ground_truth": target}
+    )
+
+    n_preds, n_gts, n_found = get_coverage(preds["candidates"].values, preds[target].values)
+
+    print(f"- {target}\t-  Recall : {n_found / n_gts :.4f}")
+    return n_found / n_gts
+    
+    
+def objective_xgb(
+    trial,
+    df_train,
+    val_regex,
+    features=[],
+    target="",
+    params=None,
+    num_boost_round=10000,
+    folds_file="",
+    probs_file="",
+    probs_mode="",
+    fold=0,
+    debug=False,
+    no_tqdm=False,
+):
+    # Data
+    iter_train = IterLoadForDMatrix(
+        df_train, features, target, ranker="rank" in params["objective"]
+    )
+    dtrain = xgb.DeviceQuantileDMatrix(iter_train, max_bin=256)
+
+    if not folds_file:
+        df_es = load_parquets_cudf(val_regex, max_n=1 if debug else 5)
+    else:
+        df_es = load_parquets_cudf_folds(
+            val_regex,
+            folds_file,
+            fold=fold,
+            max_n=1 if debug else 10,
+            val_only=True,
+            probs_file=probs_file,
+            probs_mode=probs_mode,
+            columns=['session','candidates','gt_clicks','gt_carts','gt_orders'] + features,
+        )
+    if "rank" in params["objective"]:
+        df_es = df_es.sort_values('session', ignore_index=True)
+        group = df_es[['session', 'candidates']].groupby('session').size().to_pandas().values
+        dval = xgb.DMatrix(data=df_es[features], label=df_es[target])
+    else:
+        dval = xgb.DMatrix(data=df_es[features], label=df_es[target])
+
+    del df_train, df_es
+    numba.cuda.current_context().deallocations.clear()
+    gc.collect()
+    
+    # Model
+    params = dict(
+        max_depth=trial.suggest_int("max_depth", 6, 10),
+        min_child_weight=trial.suggest_int("min_child_weight", 0, 1),
+        colsample_bytree=trial.suggest_float("colsample_bytree", 0.5, 1),
+        subsample=trial.suggest_float("subsample", 0.5, 1),
+        reg_alpha=trial.suggest_float("reg_alpha", 1e-5, 0.1, log=True),
+        reg_lambda=trial.suggest_float("reg_lambda", 1e-6, 1, log=True),
+    )
+    params.update({
+        "learning_rate": 0.01,
+        "min_child_weight": 0,
+        'eval_metric': 'auc',
+        'objective': 'binary:logistic',  # 'binary:logistic',
+        'tree_method':'gpu_hist',
+        'predictor':'gpu_predictor'
+    })
+
+    model = xgb.train(
+        params,
+        dtrain=dtrain,
+        evals=[(dval, "val")],
+        num_boost_round=num_boost_round,
+        early_stopping_rounds=100,
+        verbose_eval=100,  #  if debug else 500
+    )
+
+    del dtrain, iter_train, dval
+    numba.cuda.current_context().deallocations.clear()
+    gc.collect()
+
+    pred_val = predict_batched_xgb(
+        model,
+        val_regex,
+        features,
+        folds_file=folds_file,
+        fold=fold,
+        probs_file=probs_file,
+        probs_mode=probs_mode,
+        ranker="rank" in params["objective"],
+        debug=debug,
+        no_tqdm=no_tqdm,
+    )
+    
+    score = evaluate(pred_val, target)
+    return score
 
 
 def train_xgb(
@@ -96,26 +171,35 @@ def train_xgb(
     probs_file="",
     probs_mode="",
     fold=0,
-    debug=False
+    debug=False,
+    no_tqdm=False,
 ):
-    iter_train = IterLoadForDMatrix(df_train, features, target)
+    iter_train = IterLoadForDMatrix(
+        df_train, features, target, ranker="rank" in params["objective"]
+    )
     dtrain = xgb.DeviceQuantileDMatrix(iter_train, max_bin=256)
 
     if use_es:
         if not folds_file:
-            df_es = load_parquets_cudf(val_regex, max_n=5)
+            df_es = load_parquets_cudf(val_regex, max_n=1 if debug else 5)
         else:
             df_es = load_parquets_cudf_folds(
                 val_regex,
                 folds_file,
                 fold=fold,
-                max_n=10,
+                max_n=1 if debug else 10,
                 val_only=True,
                 probs_file=probs_file,
                 probs_mode=probs_mode,
                 columns=['session','candidates','gt_clicks','gt_carts','gt_orders'] + features,
             )
-        dval = xgb.DMatrix(data=df_es[features], label=df_es[target])
+        if "rank" in params["objective"]:
+            df_es = df_es.sort_values('session', ignore_index=True)
+            group = df_es[['session', 'candidates']].groupby('session').size().to_pandas().values
+            dval = xgb.DMatrix(data=df_es[features], label=df_es[target])
+        else:
+            dval = xgb.DMatrix(data=df_es[features], label=df_es[target])
+        
         del df_es
 
     del df_train
@@ -146,13 +230,14 @@ def train_xgb(
         fold=fold,
         probs_file=probs_file,
         probs_mode=probs_mode,
-        debug=debug
+        ranker="rank" in params["objective"],
+        debug=debug,
     )
 
     return pred_val, model
 
 
-def predict_batched_xgb(model, dfs_regex, features, folds_file="", fold=0, probs_file="", probs_mode="", test=False, debug=False):
+def predict_batched_xgb(model, dfs_regex, features, folds_file="", fold=0, probs_file="", probs_mode="", ranker=False, test=False, debug=False, no_tqdm=False):
     print('\n[Infering]')
     cols = ['session', 'candidates', 'gt_clicks', 'gt_carts', 'gt_orders', 'pred']
 
@@ -167,7 +252,7 @@ def predict_batched_xgb(model, dfs_regex, features, folds_file="", fold=0, probs
         assert len(preds)
         
     dfs = []
-    for path in tqdm(glob.glob(dfs_regex)):
+    for path in tqdm(glob.glob(dfs_regex), disable=no_tqdm):
         dfg = cudf.read_parquet(path, columns=features + (cols[:2] if test else cols[:5]))
         
         if folds_file:
@@ -180,8 +265,13 @@ def predict_batched_xgb(model, dfs_regex, features, folds_file="", fold=0, probs
             max_rank = int(probs_mode.split('_')[1])
             dfg = dfg[dfg["pred_rank"] <= max_rank]
             dfg.drop(['pred', 'pred_rank'], axis=1, inplace=True)
-
-        dval = xgb.DMatrix(data=dfg[features])
+            
+        if ranker:
+            dfg = dfg.sort_values('session', ignore_index=True)
+            group = dfg[['session', 'candidates']].groupby('session').size().to_pandas().values
+            dval = xgb.DMatrix(data=dfg[features], group=group)
+        else:
+            dval = xgb.DMatrix(data=dfg[features])
 
         dfg['pred'] = model.predict(dval)
         dfs.append(dfg[[c for c in cols if c in dfg.columns]])
