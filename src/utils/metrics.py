@@ -1,5 +1,5 @@
 import numpy as np
-
+import pandas as pd
 # from sklearn.metrics import *
 
 
@@ -70,3 +70,24 @@ def get_coverage(preds, gts):
         n_found += min(20, len(set(list(gts[i])).intersection(set(list(preds[i])))))
 
     return n_preds, n_gts, n_found
+
+
+def evaluate(df_val, target):
+    preds = df_val[['session', 'candidates', 'pred']].copy()
+    preds = preds.sort_values(['session', 'pred'], ascending=[True, False])
+    preds = preds[['session', 'candidates', 'pred']].groupby('session').agg(list).reset_index()
+    try:
+        preds = preds.to_pandas()
+    except:
+        pass
+    preds['candidates'] = preds['candidates'].apply(lambda x: x[:20])
+    
+    gt = pd.read_parquet("../output/val_labels.parquet")
+    preds = preds.merge(gt[gt["type"] == target[3:]].drop("type", axis=1), how="left").rename(
+        columns={"ground_truth": target}
+    )
+
+    n_preds, n_gts, n_found = get_coverage(preds["candidates"].values, preds[target].values)
+
+    print(f"\n-> {target}  -  Recall : {n_found / n_gts :.4f}\n")
+    return n_found / n_gts

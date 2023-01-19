@@ -95,6 +95,7 @@ def load_sessions(regexes):
     
     return cudf.concat(dfs).sort_values(['session', 'aid']).reset_index(drop=True)
 
+import time
 
 def load_parquets_cudf_folds(
     regex,
@@ -106,6 +107,7 @@ def load_parquets_cudf_folds(
     max_n=0,
     train_only=False,
     use_gt=False,
+    use_gt_for_val=False,
     columns=None,
     probs_file="",
     probs_mode="",
@@ -114,6 +116,10 @@ def load_parquets_cudf_folds(
 ):
     files = sorted(glob.glob(regex))    
     folds = cudf.read_csv(folds_file)
+    
+    if (use_gt or use_gt_for_val) and target:
+        gt = cudf.read_parquet("../output/val_labels.parquet")
+        kept_sessions = gt[gt['type'] == target[3:]].drop('ground_truth', axis=1)
 
     if probs_file:
         preds = cudf.concat([
@@ -124,9 +130,9 @@ def load_parquets_cudf_folds(
 
     dfs, dfs_val = [], []
     for idx, file in enumerate(tqdm(files, disable=(max_n>0 or no_tqdm))):
-
         df = cudf.read_parquet(file, columns=columns)
         df = df.merge(folds, on="session", how="left")
+        
         
         if probs_file:
             assert "rank" in probs_mode
@@ -135,17 +141,30 @@ def load_parquets_cudf_folds(
             df = df[df["pred_rank"] <= max_rank]
             df.drop(['pred', 'pred_rank'], axis=1, inplace=True)
 
+        t0 = time.time()
         if not train_only:
             df_val = df[df['fold'] == fold].reset_index(drop=True)
             
+            if use_gt_for_val:
+                df_val = df_val.merge(
+                    kept_sessions, on="session", how="left"
+                ).dropna(0).drop('type', axis=1).reset_index(drop=True)
+
+#             t1 = time.time()
+        
 #             if probs_file:
 #                 assert "rank" in probs_mode
 #                 df_val = df_val.merge(preds, how="left", on=["session", "candidates"])
 #                 max_rank = int(probs_mode.split('_')[1])
 #                 df_val = df_val[df_val["pred_rank"] <= max_rank]
 #                 df_val.drop(['pred', 'pred_rank'], axis=1, inplace=True)
-                
-            dfs_val.append(df_val)
+
+            if "clicks" in target:  # Use 10% of the sessions for clicks
+                df_val = df_val[df_val['session'] < df_val['session'].quantile(0.1)]
+            
+#             t2 = time.time()
+            dfs_val.append(df_val.to_pandas())
+#             t3 = time.time()
 
         df = df[df['fold'] != fold].reset_index(drop=True)
 
@@ -153,17 +172,21 @@ def load_parquets_cudf_folds(
             if max_n and (idx + 1) >= max_n:
                 break
             continue
-
+        
+#         t4 = time.time()
+        
         if target:  # Subsample
             df['gt_*'] = df[['gt_carts', "gt_clicks", "gt_orders"]].max(axis=1)
             
             if use_gt:
-                gt = cudf.read_parquet("../output/val_labels.parquet")
-                kept_sessions = gt[gt['type'] == target[3:]].drop('ground_truth', axis=1)
-                df = df.merge(kept_sessions, on="session", how="left").dropna(0).drop('type', axis=1).reset_index(drop=True)
+                df = df.merge(
+                    kept_sessions, on="session", how="left"
+                ).dropna(0).drop('type', axis=1).reset_index(drop=True)
 
             df = df.sort_values(['session', 'candidates'], ignore_index=True)
             pos = df.index[df[target] == 1]
+            
+#             t5 = time.time()
 
             seed_everything(fold)
             if pos_ratio > 0:
@@ -191,26 +214,40 @@ def load_parquets_cudf_folds(
                     df = df.iloc[cudf.concat([pos, neg])]
                 except:
                     print('WARNING ! Negative sampling error, using the whole df.')
+                    
+                
 
             elif pos_ratio == -1:  # only positives
                 df = df.iloc[pos]
             else:
                 pass
+            
+#             t6 = time.time()
 
             dfs.append(df.drop('gt_*', axis=1).to_pandas())
         else:
             dfs.append(df.to_pandas())
+            
+#         t7 = time.time()
+
+#         print(f'{t1 - t0 :.3f}')
+#         print(f'{t2 - t1 :.3f}')
+#         print(f'{t3 - t2 :.3f}')
+#         print(f'{t4 - t3 :.3f}')
+#         print(f'{t5 - t4 :.3f}')
+#         print(f'{t6 - t5 :.3f}')
+#         print(f'{t7 - t6 :.3f}')
 
         if max_n and (idx + 1) >= max_n:
             break
 
     if val_only:
-        return cudf.concat(dfs_val, ignore_index=True)
+        return pd.concat(dfs_val, ignore_index=True)
     elif train_only:
         return pd.concat(dfs, ignore_index=True)
 #         return cudf.concat(dfs, ignore_index=True)
 
-    return cudf.concat(dfs, ignore_index=True), cudf.concat(dfs_val, ignore_index=True)
+    return pd.concat(dfs, ignore_index=True), pd.concat(dfs_val, ignore_index=True)
 
 
 def prepare_train_val_data(regex, folds_file, pos_ratio=0, target="", train_only=False, use_gt=False, columns=None, save_folder=""):

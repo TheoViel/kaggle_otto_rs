@@ -22,8 +22,9 @@ def main(mode="val", gt=False):
     # Params
     MODE = mode
     CANDIDATES_VERSION = "cv3-tv5"
-#     CANDIDATES_VERSION = "c-orders-v4"
-    FEATURES_VERSION = "10b"
+#     CANDIDATES_VERSION = "clicks_cv3-tv5"
+
+    FEATURES_VERSION = "10"
 
     SUFFIX = f"{CANDIDATES_VERSION}.{FEATURES_VERSION}"
     CANDIDATE_FILE = f'../output/candidates/candidates_{CANDIDATES_VERSION}_{MODE}.parquet'
@@ -298,9 +299,9 @@ if __name__ == "__main__":
     args = parse_args()
     
     assert args.mode in ["val", "test"]
-#     main(args.mode, args.gt)
+    main(args.mode, args.gt)
 
-    for mode in ["val", "test"]:
-        main(mode, args.gt)
+#     for mode in ["val", "test"]:
+#         main(mode, args.gt)
 
     print('\n\nDone !')

@@ -8,8 +8,8 @@ import xgboost as xgb
 
 from tqdm import tqdm
 from sklearn.metrics import roc_auc_score
-
-from utils.metrics import get_coverage
+from utils.torch import seed_everything
+from utils.metrics import evaluate
 from utils.load import load_parquets_cudf, load_parquets_cudf_folds
 
 
@@ -47,27 +47,11 @@ class IterLoadForDMatrix(xgb.core.DataIter):
         return 1
 
     
-def evaluate(df_val, target):
-    preds = df_val[['session', 'candidates', 'pred']].copy()
-    preds = preds.sort_values(['session', 'pred'], ascending=[True, False])
-    preds = preds[['session', 'candidates', 'pred']].groupby('session').agg(list).reset_index()
-    preds = preds.to_pandas()
-    preds['candidates'] = preds['candidates'].apply(lambda x: x[:20])
-    
-    gt = pd.read_parquet("../output/val_labels.parquet")
-    preds = preds.merge(gt[gt["type"] == target[3:]].drop("type", axis=1), how="left").rename(
-        columns={"ground_truth": target}
-    )
-
-    n_preds, n_gts, n_found = get_coverage(preds["candidates"].values, preds[target].values)
-
-    print(f"- {target}\t-  Recall : {n_found / n_gts :.4f}")
-    return n_found / n_gts
-    
     
 def objective_xgb(
     trial,
     df_train,
+    df_val, 
     val_regex,
     features=[],
     target="",
@@ -81,15 +65,15 @@ def objective_xgb(
     no_tqdm=False,
 ):
     # Data
+    seed_everything(0)
+
     iter_train = IterLoadForDMatrix(
         df_train, features, target, ranker="rank" in params["objective"]
     )
     dtrain = xgb.DeviceQuantileDMatrix(iter_train, max_bin=256)
 
-    if not folds_file:
-        df_es = load_parquets_cudf(val_regex, max_n=1 if debug else 5)
-    else:
-        df_es = load_parquets_cudf_folds(
+    if df_val is None:
+        df_val = load_parquets_cudf_folds(
             val_regex,
             folds_file,
             fold=fold,
@@ -100,66 +84,85 @@ def objective_xgb(
             columns=['session','candidates','gt_clicks','gt_carts','gt_orders'] + features,
         )
     if "rank" in params["objective"]:
-        df_es = df_es.sort_values('session', ignore_index=True)
-        group = df_es[['session', 'candidates']].groupby('session').size().to_pandas().values
-        dval = xgb.DMatrix(data=df_es[features], label=df_es[target])
+        df_val = df_val.sort_values('session', ignore_index=True)
+        group = df_val[['session', 'candidates']].groupby('session').size().to_pandas().values
+        dval = xgb.DMatrix(data=df_val[features], label=df_val[target], group=group)
     else:
-        dval = xgb.DMatrix(data=df_es[features], label=df_es[target])
+        dval = xgb.DMatrix(data=df_val[features], label=df_val[target])
 
-    del df_train, df_es
+    del df_train
     numba.cuda.current_context().deallocations.clear()
     gc.collect()
-    
+
     # Model
-    params = dict(
+    params_ = dict(
         max_depth=trial.suggest_int("max_depth", 6, 10),
-        min_child_weight=trial.suggest_int("min_child_weight", 0, 1),
-        colsample_bytree=trial.suggest_float("colsample_bytree", 0.5, 1),
         subsample=trial.suggest_float("subsample", 0.5, 1),
+        colsample_bytree=trial.suggest_float("colsample_bytree", 0.5, 1),
         reg_alpha=trial.suggest_float("reg_alpha", 1e-5, 0.1, log=True),
         reg_lambda=trial.suggest_float("reg_lambda", 1e-6, 1, log=True),
     )
-    params.update({
-        "learning_rate": 0.01,
-        "min_child_weight": 0,
-        'eval_metric': 'auc',
-        'objective': 'binary:logistic',  # 'binary:logistic',
-        'tree_method':'gpu_hist',
-        'predictor':'gpu_predictor'
+    params_.update({
+        "learning_rate": params["learning_rate"],
+        "min_child_weight": params["min_child_weight"],
+        'eval_metric': params["eval_metric"],
+        'objective': params["objective"],
+        'tree_method': params["tree_method"],
+        'predictor': params["predictor"],
+        'random_state': params["random_state"],
     })
+    
+    seed_everything(0)
 
     model = xgb.train(
-        params,
+        params_,
         dtrain=dtrain,
         evals=[(dval, "val")],
         num_boost_round=num_boost_round,
         early_stopping_rounds=100,
-        verbose_eval=100,  #  if debug else 500
+        verbose_eval=100,
     )
 
+    cols = ['session', 'candidates', 'gt_clicks', 'gt_carts', 'gt_orders', 'pred']
+    df_val['pred'] = model.predict(dval)
+    score = evaluate(df_val[[c for c in cols if c in df_val.columns]], target)
+    
     del dtrain, iter_train, dval
     numba.cuda.current_context().deallocations.clear()
     gc.collect()
 
-    pred_val = predict_batched_xgb(
-        model,
-        val_regex,
-        features,
-        folds_file=folds_file,
-        fold=fold,
-        probs_file=probs_file,
-        probs_mode=probs_mode,
-        ranker="rank" in params["objective"],
-        debug=debug,
-        no_tqdm=no_tqdm,
-    )
-    
-    score = evaluate(pred_val, target)
+#     pred_val = predict_batched_xgb(
+#         model,
+#         val_regex,
+#         features,
+#         folds_file=folds_file,
+#         fold=fold,
+#         probs_file=probs_file,
+#         probs_mode=probs_mode,
+#         ranker="rank" in params["objective"],
+#         debug=debug,
+#         no_tqdm=no_tqdm,
+#     )
+#     score = evaluate(pred_val, target)
+
+    display_params = {}
+    for param, v in params_.items():
+        if param == "learning_rate":
+            break
+        if "sample" in param:
+            display_params[param] = f'{v :.3f}'
+        elif "reg_" in param:
+            display_params[param] = f'{v :.2e}'
+        else:
+            display_params[param] = v
+    print(f'Params : {display_params},\n')
+
     return score
 
 
 def train_xgb(
     df_train,
+    df_val,
     val_regex,
     features=[],
     target="",
@@ -174,65 +177,73 @@ def train_xgb(
     debug=False,
     no_tqdm=False,
 ):
+    seed_everything(0)
+
     iter_train = IterLoadForDMatrix(
         df_train, features, target, ranker="rank" in params["objective"]
     )
     dtrain = xgb.DeviceQuantileDMatrix(iter_train, max_bin=256)
 
-    if use_es:
-        if not folds_file:
-            df_es = load_parquets_cudf(val_regex, max_n=1 if debug else 5)
-        else:
-            df_es = load_parquets_cudf_folds(
-                val_regex,
-                folds_file,
-                fold=fold,
-                max_n=1 if debug else 10,
-                val_only=True,
-                probs_file=probs_file,
-                probs_mode=probs_mode,
-                columns=['session','candidates','gt_clicks','gt_carts','gt_orders'] + features,
-            )
-        if "rank" in params["objective"]:
-            df_es = df_es.sort_values('session', ignore_index=True)
-            group = df_es[['session', 'candidates']].groupby('session').size().to_pandas().values
-            dval = xgb.DMatrix(data=df_es[features], label=df_es[target])
-        else:
-            dval = xgb.DMatrix(data=df_es[features], label=df_es[target])
-        
-        del df_es
+    if df_val is None:
+        df_val = load_parquets_cudf_folds(
+            val_regex,
+            folds_file,
+            fold=fold,
+            max_n=1 if debug else 10,
+            val_only=True,
+            probs_file=probs_file,
+            probs_mode=probs_mode,
+            columns=['session','candidates','gt_clicks','gt_carts','gt_orders'] + features,
+        )
+    if "rank" in params["objective"]:
+        df_val = df_val.sort_values('session', ignore_index=True)
+        group = df_val[['session', 'candidates']].groupby('session').size().to_pandas().values
+        dval = xgb.DMatrix(data=df_val[features], label=df_val[target], group=group)
+    else:
+        dval = xgb.DMatrix(data=df_val[features], label=df_val[target])
 
     del df_train
     numba.cuda.current_context().deallocations.clear()
     gc.collect()
+    
+    seed_everything(0)
 
-    # TRAIN MODEL FOLD K
     model = xgb.train(
         params,
         dtrain=dtrain,
         evals=[(dval, "val")] if use_es else None,
         num_boost_round=num_boost_round,
-        early_stopping_rounds=200 if use_es else None,
+        early_stopping_rounds=100 if use_es else None,
         verbose_eval=100 if use_es else None,
     )
-    
-    if use_es:
-        del dval
+
     del dtrain, iter_train
     numba.cuda.current_context().deallocations.clear()
     gc.collect()
 
-    pred_val = predict_batched_xgb(
-        model,
-        val_regex,
-        features,
-        folds_file=folds_file,
-        fold=fold,
-        probs_file=probs_file,
-        probs_mode=probs_mode,
-        ranker="rank" in params["objective"],
-        debug=debug,
-    )
+    if no_tqdm:  # Rerun inf
+        del df_train, df_val, dval
+        numba.cuda.current_context().deallocations.clear()
+        gc.collect()
+
+        pred_val = predict_batched_xgb(
+            model,
+            val_regex,
+            features,
+            folds_file=folds_file,
+            fold=fold,
+            probs_file=probs_file,
+            probs_mode=probs_mode,
+            ranker="rank" in params["objective"],
+            debug=debug,
+            no_tqdm=True,
+        )
+    else:
+        cols = ['session', 'candidates', 'gt_clicks', 'gt_carts', 'gt_orders', 'pred']
+        df_val['pred'] = model.predict(dval)
+        pred_val = df_val[[c for c in cols if c in df_val.columns]]
+
+    evaluate(pred_val, target)
 
     return pred_val, model
 
