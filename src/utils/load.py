@@ -114,6 +114,11 @@ def load_parquets_cudf_folds(
     seed=42,
     no_tqdm=False,
 ):
+    filtered = target in regex
+    if filtered:
+        assert use_gt and use_gt_for_val
+        print(f'Files were filtered !')
+
     files = sorted(glob.glob(regex))    
     folds = cudf.read_csv(folds_file)
     
@@ -133,7 +138,12 @@ def load_parquets_cudf_folds(
         df = cudf.read_parquet(file, columns=columns)
         df = df.merge(folds, on="session", how="left")
         
-        
+        if not filtered and (use_gt and use_gt_for_val):
+            df = df.merge(
+                kept_sessions, on="session", how="left"
+            ).dropna(0).drop('type', axis=1).reset_index(drop=True)
+            filtered = True
+
         if probs_file:
             assert "rank" in probs_mode
             df = df.merge(preds, how="left", on=["session", "candidates"])
@@ -145,7 +155,7 @@ def load_parquets_cudf_folds(
         if not train_only:
             df_val = df[df['fold'] == fold].reset_index(drop=True)
             
-            if use_gt_for_val:
+            if use_gt_for_val and not filtered:
                 df_val = df_val.merge(
                     kept_sessions, on="session", how="left"
                 ).dropna(0).drop('type', axis=1).reset_index(drop=True)
@@ -178,7 +188,7 @@ def load_parquets_cudf_folds(
         if target:  # Subsample
             df['gt_*'] = df[['gt_carts', "gt_clicks", "gt_orders"]].max(axis=1)
             
-            if use_gt:
+            if use_gt and not filtered:
                 df = df.merge(
                     kept_sessions, on="session", how="left"
                 ).dropna(0).drop('type', axis=1).reset_index(drop=True)
@@ -308,3 +318,21 @@ def prepare_train_val_data(regex, folds_file, pos_ratio=0, target="", train_only
         del df
         numba.cuda.current_context().deallocations.clear()
         gc.collect()
+
+        
+def filter_dfs(regex, target=""):
+    gt = cudf.read_parquet("../output/val_labels.parquet")
+    kept_sessions = gt[gt['type'] == target[3:]].drop('ground_truth', axis=1)
+    
+    save_folder = regex.rsplit('/', 1)[0] + "_" + target + "/"
+    os.makedirs(save_folder, exist_ok=True)
+
+    for idx, file in enumerate(tqdm(sorted(glob.glob(regex)))):
+        if os.path.exists(save_folder + file.split('/')[-1]):
+            continue
+        df = cudf.read_parquet(file)
+        df = df.merge(
+            kept_sessions, on="session", how="left"
+        ).dropna(0).drop('type', axis=1)
+        
+        df.to_parquet(save_folder + file.split('/')[-1])

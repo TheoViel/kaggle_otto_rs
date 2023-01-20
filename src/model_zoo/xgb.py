@@ -94,28 +94,21 @@ def objective_xgb(
     numba.cuda.current_context().deallocations.clear()
     gc.collect()
 
-    # Model
-    params_ = dict(
+    # Params
+    params_to_tweak = dict(
         max_depth=trial.suggest_int("max_depth", 6, 10),
         subsample=trial.suggest_float("subsample", 0.5, 1),
         colsample_bytree=trial.suggest_float("colsample_bytree", 0.5, 1),
         reg_alpha=trial.suggest_float("reg_alpha", 1e-5, 0.1, log=True),
         reg_lambda=trial.suggest_float("reg_lambda", 1e-6, 1, log=True),
     )
-    params_.update({
-        "learning_rate": params["learning_rate"],
-        "min_child_weight": params["min_child_weight"],
-        'eval_metric': params["eval_metric"],
-        'objective': params["objective"],
-        'tree_method': params["tree_method"],
-        'predictor': params["predictor"],
-        'random_state': params["random_state"],
-    })
-    
+    params.update(params_to_tweak)
+
+    # Model
     seed_everything(0)
 
     model = xgb.train(
-        params_,
+        params,
         dtrain=dtrain,
         evals=[(dval, "val")],
         num_boost_round=num_boost_round,
@@ -123,6 +116,7 @@ def objective_xgb(
         verbose_eval=100,
     )
 
+    # Eval & verbose
     cols = ['session', 'candidates', 'gt_clicks', 'gt_carts', 'gt_orders', 'pred']
     df_val['pred'] = model.predict(dval)
     score = evaluate(df_val[[c for c in cols if c in df_val.columns]], target)
@@ -131,24 +125,8 @@ def objective_xgb(
     numba.cuda.current_context().deallocations.clear()
     gc.collect()
 
-#     pred_val = predict_batched_xgb(
-#         model,
-#         val_regex,
-#         features,
-#         folds_file=folds_file,
-#         fold=fold,
-#         probs_file=probs_file,
-#         probs_mode=probs_mode,
-#         ranker="rank" in params["objective"],
-#         debug=debug,
-#         no_tqdm=no_tqdm,
-#     )
-#     score = evaluate(pred_val, target)
-
     display_params = {}
-    for param, v in params_.items():
-        if param == "learning_rate":
-            break
+    for param, v in params_to_tweak.items():
         if "sample" in param:
             display_params[param] = f'{v :.3f}'
         elif "reg_" in param:
@@ -221,8 +199,8 @@ def train_xgb(
     numba.cuda.current_context().deallocations.clear()
     gc.collect()
 
-    if no_tqdm:  # Rerun inf
-        del df_train, df_val, dval
+    if no_tqdm and "clicks" in target:  # Rerun inf
+        del df_val, dval
         numba.cuda.current_context().deallocations.clear()
         gc.collect()
 

@@ -198,7 +198,14 @@ def kfold(regex, test_regex, config, log_folder, debug=False):
         
         if log_folder is None:
             return df_val, ft_imp
+        
+        print('\n -> Saving val predictions \n')
+        df_val[['session', 'candidates', 'pred']].to_parquet(log_folder + f"df_val_{fold}.parquet")
 
+        del df_train, df_val, ft_imp
+        numba.cuda.current_context().deallocations.clear()
+        gc.collect()
+        
         predict_fct = PREDICT_FCTS[config.model]
         df_test = predict_fct(
             model,
@@ -212,19 +219,16 @@ def kfold(regex, test_regex, config, log_folder, debug=False):
         )
         dfs_test.append(df_test)
         
-        print('\n -> Saving predictions \n')
-        df_val[['session', 'candidates', 'pred']].to_parquet(log_folder + f"df_val_{fold}.parquet")
-        
+        print('\n -> Saving test predictions \n')
         df_test[['session', 'candidates']] = df_test[['session', 'candidates']].astype('int32')
         df_test['pred'] = df_test['pred'].astype('float32')
         df_test[['session', 'candidates', 'pred']].to_parquet(log_folder + f"df_test_{fold}.parquet")
 
-        del df_train, df_val, ft_imp, df_test, model
+        del df_test, model
         numba.cuda.current_context().deallocations.clear()
         gc.collect()
 
     dfs_val =  cudf.concat(dfs_val).sort_values(['session', 'candidates'], ignore_index=True)
-
     ft_imps = pd.concat(ft_imps).reset_index().groupby('index').mean()
     if log_folder is not None:
         ft_imps.to_csv(log_folder + "ft_imp.csv")
