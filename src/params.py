@@ -16,3 +16,5 @@ N_IDS = 1855610
 CLS_TOKEN = 1855609
 
 TYPE_LABELS = {"clicks": 0, "carts": 1, "orders": 2}
+
+NEPTUNE_PROJECT = "KagglingTheo/Otto-Recommender-System"

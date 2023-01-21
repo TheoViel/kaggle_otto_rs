@@ -72,7 +72,7 @@ def get_coverage(preds, gts):
     return n_preds, n_gts, n_found
 
 
-def evaluate(df_val, target):
+def evaluate(df_val, target, verbose=1):
     preds = df_val[['session', 'candidates', 'pred']].copy()
     preds = preds.sort_values(['session', 'pred'], ascending=[True, False])
     preds = preds[['session', 'candidates', 'pred']].groupby('session').agg(list).reset_index()
@@ -89,5 +89,6 @@ def evaluate(df_val, target):
 
     n_preds, n_gts, n_found = get_coverage(preds["candidates"].values, preds[target].values)
 
-    print(f"\n-> {target}  -  Recall : {n_found / n_gts :.4f}\n")
+    if verbose:
+        print(f"\n-> {target}  -  Recall : {n_found / n_gts :.4f}\n")
     return n_found / n_gts

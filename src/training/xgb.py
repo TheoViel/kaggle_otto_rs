@@ -4,7 +4,9 @@ import cudf
 import glob
 import numba
 import optuna
+import numpy as np
 import pandas as pd
+
 from sklearn.metrics import roc_auc_score
 from numerize.numerize import numerize
 from utils.torch import seed_everything
@@ -12,9 +14,11 @@ from utils.torch import seed_everything
 from model_zoo import TRAIN_FCTS, PREDICT_FCTS
 from model_zoo.xgb import objective_xgb
 from utils.load import load_parquets_cudf_folds
+from utils.metrics import evaluate
+from utils.plot import plot_importances
 
 
-def optimize(regex, config, log_folder, n_trials=100, debug=False, df_train=None, df_val=None):
+def optimize(regex, config, log_folder, n_trials=100, debug=False, df_train=None, df_val=None, run=None):
     print(f"\n-------------  Optimizing {config.model.upper()} Model  -------------\n")
     seed_everything(config.seed)
 
@@ -52,7 +56,8 @@ def optimize(regex, config, log_folder, n_trials=100, debug=False, df_train=None
         probs_mode=config.probs_mode,
         fold=0,
         debug=debug,
-        no_tqdm=log_folder is not None
+        no_tqdm=log_folder is not None,
+        run=run,
     )
 
     study.optimize(objective, n_trials=1 if debug else n_trials)
@@ -117,9 +122,10 @@ def train(df_train, df_val, regex, config, log_folder=None, fold=0, debug=False)
     return df_val, ft_imp, model
 
 
-def kfold(regex, test_regex, config, log_folder, debug=False):
+def kfold(regex, test_regex, config, log_folder, debug=False, run=None):
     seed_everything(config.seed)
-    dfs_val, ft_imps, dfs_test = [], [], []
+    ft_imps, scores = [], []
+
     for fold in range(config.k):
         if fold not in config.selected_folds:
             continue
@@ -158,9 +164,13 @@ def kfold(regex, test_regex, config, log_folder, debug=False):
                 n_trials=1 if debug else config.n_trials,
                 debug=debug,
                 df_train=df_train,
-                df_val=df_val
+                df_val=df_val,
+                run=run,
             )
             config.params.update(study.best_params)
+            
+            if run is not None:
+                run[f"fold_{fold}/best_params/"] = study.best_params
 
 #         if config.use_gt_pos:
 #             df_train_gt = load_parquets_cudf_folds(
@@ -186,7 +196,6 @@ def kfold(regex, test_regex, config, log_folder, debug=False):
             fold=fold,
             debug=debug
         )
-        dfs_val.append(df_val)
         ft_imps.append(ft_imp)
         
         try:
@@ -197,7 +206,12 @@ def kfold(regex, test_regex, config, log_folder, debug=False):
             pass
         
         if log_folder is None:
-            return df_val, ft_imp
+            return ft_imp
+        
+        if run is not None:
+            score = evaluate(df_val, config.target, verbose=0)
+            scores.append(score)
+            run[f"fold_{fold}/recall"] = score
         
         print('\n -> Saving val predictions \n')
         df_val[['session', 'candidates', 'pred']].to_parquet(log_folder + f"df_val_{fold}.parquet")
@@ -217,7 +231,6 @@ def kfold(regex, test_regex, config, log_folder, debug=False):
             ranker=("rank" in config.params["objective"]),
             no_tqdm=True,
         )
-        dfs_test.append(df_test)
         
         print('\n -> Saving test predictions \n')
         df_test[['session', 'candidates']] = df_test[['session', 'candidates']].astype('int32')
@@ -228,9 +241,13 @@ def kfold(regex, test_regex, config, log_folder, debug=False):
         numba.cuda.current_context().deallocations.clear()
         gc.collect()
 
-    dfs_val =  cudf.concat(dfs_val).sort_values(['session', 'candidates'], ignore_index=True)
     ft_imps = pd.concat(ft_imps).reset_index().groupby('index').mean()
     if log_folder is not None:
         ft_imps.to_csv(log_folder + "ft_imp.csv")
 
-    return dfs_val, ft_imps
+    if run is not None:
+        run["global/logs"].upload(log_folder + "logs.txt")
+        run["global/recall"] = np.mean(scores)
+        plot_importances(ft_imps, run=run)
+
+    return ft_imps

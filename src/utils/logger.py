@@ -6,6 +6,9 @@ import shutil
 import datetime
 import subprocess
 import numpy as np
+import neptune.new as neptune
+
+from params import NEPTUNE_PROJECT
 
 
 class Config:
@@ -101,3 +104,22 @@ def save_config(config, path):
 
     with open(path, "w") as f:
         json.dump(dic, f)
+
+        
+def init_neptune(config, log_folder):
+    print()
+    run = neptune.init_run(project=NEPTUNE_PROJECT)
+
+    run["global/log_folder"] = log_folder
+
+    dic = config.__dict__.copy()
+    del (dic["__doc__"], dic["__module__"], dic["__dict__"], dic["__weakref__"])
+    for k in dic.keys():
+        if not isinstance(dic[k], (dict, int, float, str)):
+            dic[k] = str(dic[k])
+
+    run["global/parameters/"] = dic
+
+    run["global/config"].upload(log_folder + "config.json")
+    print()
+    return run

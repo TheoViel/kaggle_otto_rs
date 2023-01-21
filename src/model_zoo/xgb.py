@@ -63,6 +63,7 @@ def objective_xgb(
     fold=0,
     debug=False,
     no_tqdm=False,
+    run=None
 ):
     # Data
     seed_everything(0)
@@ -83,12 +84,12 @@ def objective_xgb(
             probs_mode=probs_mode,
             columns=['session','candidates','gt_clicks','gt_carts','gt_orders'] + features,
         )
-    if "rank" in params["objective"]:
-        df_val = df_val.sort_values('session', ignore_index=True)
-        group = df_val[['session', 'candidates']].groupby('session').size().to_pandas().values
-        dval = xgb.DMatrix(data=df_val[features], label=df_val[target], group=group)
-    else:
-        dval = xgb.DMatrix(data=df_val[features], label=df_val[target])
+#     if "rank" in params["objective"]:
+#         df_val = df_val.sort_values('session', ignore_index=True)
+#         group = df_val[['session', 'candidates']].groupby('session').size().values
+#         dval = xgb.DMatrix(data=df_val[features], label=df_val[target], group=group)
+#     else:
+    dval = xgb.DMatrix(data=df_val[features], label=df_val[target])
 
     del df_train
     numba.cuda.current_context().deallocations.clear()
@@ -101,6 +102,8 @@ def objective_xgb(
         colsample_bytree=trial.suggest_float("colsample_bytree", 0.5, 1),
         reg_alpha=trial.suggest_float("reg_alpha", 1e-5, 0.1, log=True),
         reg_lambda=trial.suggest_float("reg_lambda", 1e-6, 1, log=True),
+#         scale_pos_weight=trial.suggest_float("scale_pos_weight", 1, 5),
+#         min_child_weight=trial.suggest_float("min_child_weight", 0, 1),
     )
     params.update(params_to_tweak)
 
@@ -121,6 +124,9 @@ def objective_xgb(
     df_val['pred'] = model.predict(dval)
     score = evaluate(df_val[[c for c in cols if c in df_val.columns]], target)
     
+    if run is not None:
+        run[f"fold_{fold}/recall_opt"].log(score)
+
     del dtrain, iter_train, dval
     numba.cuda.current_context().deallocations.clear()
     gc.collect()
@@ -173,12 +179,12 @@ def train_xgb(
             probs_mode=probs_mode,
             columns=['session','candidates','gt_clicks','gt_carts','gt_orders'] + features,
         )
-    if "rank" in params["objective"]:
-        df_val = df_val.sort_values('session', ignore_index=True)
-        group = df_val[['session', 'candidates']].groupby('session').size().to_pandas().values
-        dval = xgb.DMatrix(data=df_val[features], label=df_val[target], group=group)
-    else:
-        dval = xgb.DMatrix(data=df_val[features], label=df_val[target])
+#     if "rank" in params["objective"]:
+#         df_val = df_val.sort_values('session', ignore_index=True)
+#         group = df_val[['session', 'candidates']].groupby('session').size().values
+#         dval = xgb.DMatrix(data=df_val[features], label=df_val[target], group=group)
+#     else:
+    dval = xgb.DMatrix(data=df_val[features], label=df_val[target])
 
     del df_train
     numba.cuda.current_context().deallocations.clear()
@@ -255,12 +261,12 @@ def predict_batched_xgb(model, dfs_regex, features, folds_file="", fold=0, probs
             dfg = dfg[dfg["pred_rank"] <= max_rank]
             dfg.drop(['pred', 'pred_rank'], axis=1, inplace=True)
             
-        if ranker:
-            dfg = dfg.sort_values('session', ignore_index=True)
-            group = dfg[['session', 'candidates']].groupby('session').size().to_pandas().values
-            dval = xgb.DMatrix(data=dfg[features], group=group)
-        else:
-            dval = xgb.DMatrix(data=dfg[features])
+#         if ranker:
+#             dfg = dfg.sort_values('session', ignore_index=True)
+#             group = dfg[['session', 'candidates']].groupby('session').size().to_pandas().values
+#             dval = xgb.DMatrix(data=dfg[features], group=group)
+#         else:
+        dval = xgb.DMatrix(data=dfg[features])
 
         dfg['pred'] = model.predict(dval)
         dfs.append(dfg[[c for c in cols if c in dfg.columns]])

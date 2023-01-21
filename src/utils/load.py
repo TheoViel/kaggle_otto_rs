@@ -159,8 +159,6 @@ def load_parquets_cudf_folds(
                 df_val = df_val.merge(
                     kept_sessions, on="session", how="left"
                 ).dropna(0).drop('type', axis=1).reset_index(drop=True)
-
-#             t1 = time.time()
         
 #             if probs_file:
 #                 assert "rank" in probs_mode
@@ -171,10 +169,8 @@ def load_parquets_cudf_folds(
 
             if "clicks" in target:  # Use 10% of the sessions for clicks
                 df_val = df_val[df_val['session'] < df_val['session'].quantile(0.1)]
-            
-#             t2 = time.time()
+
             dfs_val.append(df_val.to_pandas())
-#             t3 = time.time()
 
         df = df[df['fold'] != fold].reset_index(drop=True)
 
@@ -182,8 +178,6 @@ def load_parquets_cudf_folds(
             if max_n and (idx + 1) >= max_n:
                 break
             continue
-        
-#         t4 = time.time()
         
         if target:  # Subsample
             df['gt_*'] = df[['gt_carts', "gt_clicks", "gt_orders"]].max(axis=1)
@@ -195,8 +189,6 @@ def load_parquets_cudf_folds(
 
             df = df.sort_values(['session', 'candidates'], ignore_index=True)
             pos = df.index[df[target] == 1]
-            
-#             t5 = time.time()
 
             seed_everything(fold)
             if pos_ratio > 0:
@@ -224,8 +216,6 @@ def load_parquets_cudf_folds(
                     df = df.iloc[cudf.concat([pos, neg])]
                 except:
                     print('WARNING ! Negative sampling error, using the whole df.')
-                    
-                
 
             elif pos_ratio == -1:  # only positives
                 df = df.iloc[pos]
@@ -237,17 +227,6 @@ def load_parquets_cudf_folds(
             dfs.append(df.drop('gt_*', axis=1).to_pandas())
         else:
             dfs.append(df.to_pandas())
-            
-#         t7 = time.time()
-
-#         print(f'{t1 - t0 :.3f}')
-#         print(f'{t2 - t1 :.3f}')
-#         print(f'{t3 - t2 :.3f}')
-#         print(f'{t4 - t3 :.3f}')
-#         print(f'{t5 - t4 :.3f}')
-#         print(f'{t6 - t5 :.3f}')
-#         print(f'{t7 - t6 :.3f}')
-
         if max_n and (idx + 1) >= max_n:
             break
 
