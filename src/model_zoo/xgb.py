@@ -46,8 +46,7 @@ class IterLoadForDMatrix(xgb.core.DataIter):
         self.it += 1
         return 1
 
-    
-    
+
 def objective_xgb(
     trial,
     df_train,

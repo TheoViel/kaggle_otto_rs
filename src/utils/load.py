@@ -2,6 +2,7 @@ import gc
 import os
 import glob
 import cudf
+import time
 import numba
 import numpy as np
 import pandas as pd
@@ -95,7 +96,6 @@ def load_sessions(regexes):
     
     return cudf.concat(dfs).sort_values(['session', 'aid']).reset_index(drop=True)
 
-import time
 
 def load_parquets_cudf_folds(
     regex,

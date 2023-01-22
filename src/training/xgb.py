@@ -7,9 +7,10 @@ import optuna
 import numpy as np
 import pandas as pd
 
-from sklearn.metrics import roc_auc_score
+from cuml import PCA
 from numerize.numerize import numerize
 from utils.torch import seed_everything
+from sklearn.metrics import roc_auc_score
 
 from model_zoo import TRAIN_FCTS, PREDICT_FCTS
 from model_zoo.xgb import objective_xgb
@@ -18,7 +19,7 @@ from utils.metrics import evaluate
 from utils.plot import plot_importances
 
 
-def optimize(regex, config, log_folder, n_trials=100, debug=False, df_train=None, df_val=None, run=None):
+def optimize(regex, config, log_folder, n_trials=100, fold=0, debug=False, df_train=None, df_val=None, run=None):
     print(f"\n-------------  Optimizing {config.model.upper()} Model  -------------\n")
     seed_everything(config.seed)
 
@@ -26,7 +27,7 @@ def optimize(regex, config, log_folder, n_trials=100, debug=False, df_train=None
         df_train, df_val = load_parquets_cudf_folds(
             regex,
             config.folds_file,
-            fold=0,
+            fold=fold,
             pos_ratio=config.pos_ratio,
             target=config.target,
             use_gt=config.use_gt_sessions,
@@ -149,6 +150,25 @@ def kfold(regex, test_regex, config, log_folder, debug=False, run=None):
             no_tqdm=log_folder is not None
         )
         
+        if config.pca_components:
+            print('Applying PCA')
+            pca = PCA(n_components=config.pca_components, random_state=config.seed)
+
+            pca_features = [f'pca_{i}' for i in range(config.pca_components)]
+            pca.fit(
+                pd.concat([df_train[config.features], df_val[config.features]], axis=0, ignore_index=True)
+            )
+
+            new_train = pca.transform(df_train[config.features])
+            new_train = pd.DataFrame(new_train, columns=pca_features)
+            df_train = pd.concat([df_train.drop(config.features, axis=1), new_train], axis=1)
+
+            new_val = pca.transform(df_val[config.features])
+            new_val = pd.DataFrame(new_val, columns=pca_features)
+            df_val = pd.concat([df_val.drop(config.features, axis=1), new_val], axis=1)
+
+            config.features = pca_features
+        
         try:
             train_sessions = set(list(df_train["session"].unique()))
             val_sessions = set(list(df_val["session"].unique()))
@@ -165,6 +185,7 @@ def kfold(regex, test_regex, config, log_folder, debug=False, run=None):
                 debug=debug,
                 df_train=df_train,
                 df_val=df_val,
+                fold=fold,
                 run=run,
             )
             config.params.update(study.best_params)

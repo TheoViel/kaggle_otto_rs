@@ -17,14 +17,14 @@ from utils.load import load_sessions
 warnings.simplefilter(action="ignore", category=FutureWarning)
 warnings.simplefilter(action="ignore", category=UserWarning)
 
-
 def main(mode="val", gt=False):
     # Params
     MODE = mode
     CANDIDATES_VERSION = "cv3-tv5"
 #     CANDIDATES_VERSION = "clicks_cv3-tv5"
+    CANDIDATES_VERSION = "cv5-tv5-2"
 
-    FEATURES_VERSION = "10"
+    FEATURES_VERSION = "11"
 
     SUFFIX = f"{CANDIDATES_VERSION}.{FEATURES_VERSION}"
     CANDIDATE_FILE = f'../output/candidates/candidates_{CANDIDATES_VERSION}_{MODE}.parquet'
@@ -73,14 +73,29 @@ def main(mode="val", gt=False):
         f'embed_1_64_{MODE}',
         f'embed_1-5_64_{MODE}',
     ]
-    
+            
     # Chunks
     CHUNK_SIZE = 1_000_000
 
     all_pairs = cudf.read_parquet(CANDIDATE_FILE)
-    all_pairs = all_pairs.sort_values(['session', 'candidates']).reset_index(drop=True)
     
+    if MODE == "val" and "clicks" not in CANDIDATES_VERSION:  # Remove useless sessions for speed-up
+        gt = cudf.read_parquet("../output/val_labels.parquet")
+        kept_sessions = gt[gt['type'] != "clicks"].drop('ground_truth', axis=1)
+        kept_sessions = kept_sessions.drop_duplicates(subset="session", keep="first")
+
+        prev_len = len(all_pairs)
+        all_pairs = all_pairs.merge(
+            kept_sessions, on="session", how="left"
+        ).dropna(0).drop('type', axis=1).reset_index(drop=True)
+
+        factor = prev_len / len(all_pairs)
+        print(f'Reduced dataset size by {factor:.1f}x')
+        CHUNK_SIZE = int(CHUNK_SIZE * factor)
+
+    all_pairs = all_pairs.sort_values(['session', 'candidates']).reset_index(drop=True)
     all_pairs['group'] = all_pairs['session'] // (CHUNK_SIZE // 50)
+
     N_PARTS = len(all_pairs['group'].unique())
     
     all_pairs = all_pairs.to_pandas()

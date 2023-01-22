@@ -19,10 +19,16 @@ class setEncoder(json.JSONEncoder):
 
 
 @beartype
-def split_events(events: List[dict], split_idx=None):
+def split_events(events: List[dict], split_idx=None, last_2=False):
     test_events = ground_truth(deepcopy(events))
+
+    if last_2:
+        split_idx = len(test_events) - 2
+        split_idx = max(0, split_idx)
+
     if not split_idx:
         split_idx = random.randint(1, len(test_events))
+    
     test_events = test_events[:split_idx]
     labels = test_events[-1]["labels"]
     for event in test_events:
@@ -32,7 +38,7 @@ def split_events(events: List[dict], split_idx=None):
 
 @beartype
 def create_kaggle_testset(
-    sessions: pd.DataFrame, sessions_output: Path, labels_output: Path
+    sessions: pd.DataFrame, sessions_output: Path, labels_output: Path, last_2=False,
 ):
     last_labels = []
     splitted_sessions = []
@@ -42,7 +48,7 @@ def create_kaggle_testset(
     ):
         session = session.to_dict()
         try:
-            splitted_events, labels = split_events(session["events"])
+            splitted_events, labels = split_events(session["events"], last_2=last_2)
         except ValueError:
             #             print(f'Skipping session {session}')
             #             print()
@@ -83,6 +89,7 @@ def train_test_split(
     test_file,
     max_ts,
     test_days=7,
+    trim=True
 ):
     assert (test_file is not None) or (train_file is not None), "Saving nothing !"
 
@@ -106,7 +113,8 @@ def train_test_split(
                 if test_file is not None:
                     test_file.write(json.dumps(session, cls=setEncoder) + "\n")
             elif train_file is not None:  # Train
-                session = trim_session(session, split_ts)
+                if trim:
+                    session = trim_session(session, split_ts)
                 train_file.write(json.dumps(session, cls=setEncoder) + "\n")
 
     if train_file is not None:
