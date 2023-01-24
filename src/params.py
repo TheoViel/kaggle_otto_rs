@@ -18,3 +18,7 @@ CLS_TOKEN = 1855609
 TYPE_LABELS = {"clicks": 0, "carts": 1, "orders": 2}
 
 NEPTUNE_PROJECT = "KagglingTheo/Otto-Recommender-System"
+
+
+GT_FILE = "../output/val_labels.parquet"
+# GT_FILE = "../output/val_labels_2.parquet"

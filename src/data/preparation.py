@@ -21,7 +21,7 @@ def prepare_data(root):
     return df, df_test
 
 
-def json_to_pq(file, output_path="", name=None):
+def json_to_pq(file, output_path="", name=None, shift_sess=False):
     """
     https://www.kaggle.com/datasets/columbia2131/otto-chunk-data-inparquet-format
     """
@@ -44,7 +44,8 @@ def json_to_pq(file, output_path="", name=None):
 
         for session, events in zip(chunk["session"].tolist(), chunk["events"].tolist()):
             for event in events:
-                event_dict["session"].append(session)
+                sess = session + int(1e8) if shift_sess else session
+                event_dict["session"].append(sess)
                 event_dict["aid"].append(event["aid"])
                 event_dict["ts"].append(event["ts"])
                 event_dict["type"].append(event["type"])
@@ -53,7 +54,7 @@ def json_to_pq(file, output_path="", name=None):
         pd.DataFrame(event_dict).to_parquet(save_folder / f"{e:03d}.parquet")
 
 
-def json_to_pq_y(file, output_path="", name=None):
+def json_to_pq_y(file, output_path="", name=None, shift_sess=False):
     """
     https://www.kaggle.com/datasets/columbia2131/otto-chunk-data-inparquet-format
     """
@@ -69,7 +70,8 @@ def json_to_pq_y(file, output_path="", name=None):
 
     for session, labels in df.values:
         for k, v in labels.items():
-            event_dict["session"].append(session)
+            sess = session + int(1e8) if shift_sess else session
+            event_dict["session"].append(sess)
             event_dict["type"].append(k)
             event_dict["ground_truth"].append(np.array([v]).flatten())
 

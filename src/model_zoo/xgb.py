@@ -96,9 +96,11 @@ def objective_xgb(
 
     # Params
     params_to_tweak = dict(
-        max_depth=trial.suggest_int("max_depth", 6, 10),
-        subsample=trial.suggest_float("subsample", 0.5, 1),
+        max_depth=trial.suggest_int("max_depth", 5, 10),
+        subsample=trial.suggest_float("subsample", 0.4, 1),
         colsample_bytree=trial.suggest_float("colsample_bytree", 0.5, 1),
+#         reg_alpha=trial.suggest_float("reg_alpha", 0.01, 10, log=True),
+#         reg_lambda=trial.suggest_float("reg_lambda", 0.01, 10, log=True),
         reg_alpha=trial.suggest_float("reg_alpha", 1e-5, 0.1, log=True),
         reg_lambda=trial.suggest_float("reg_lambda", 1e-6, 1, log=True),
 #         scale_pos_weight=trial.suggest_float("scale_pos_weight", 1, 5),

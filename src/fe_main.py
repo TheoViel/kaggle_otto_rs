@@ -17,12 +17,15 @@ from utils.load import load_sessions
 warnings.simplefilter(action="ignore", category=FutureWarning)
 warnings.simplefilter(action="ignore", category=UserWarning)
 
+
 def main(mode="val", gt=False):
+    from params import GT_FILE
+
     # Params
     MODE = mode
-    CANDIDATES_VERSION = "cv3-tv5"
+#     CANDIDATES_VERSION = "cv6-tv6"  # BOOSTED
+    CANDIDATES_VERSION = "cv7-tv5"
 #     CANDIDATES_VERSION = "clicks_cv3-tv5"
-    CANDIDATES_VERSION = "cv5-tv5-2"
 
     FEATURES_VERSION = "11"
 
@@ -30,6 +33,10 @@ def main(mode="val", gt=False):
     CANDIDATE_FILE = f'../output/candidates/candidates_{CANDIDATES_VERSION}_{MODE}.parquet'
     PARQUET_FILES = f"../output/{MODE}_parquet/*"
     
+    if MODE == "extra":
+        GT_FILE = "../output/val_labels_trimmed.parquet"
+        PARQUET_FILES = "../output/val_trimmed_parquet/*"
+
     if gt:
         MODE = "val"
         CANDIDATE_FILE = f'../output/candidates/candidates_gt.parquet'
@@ -41,46 +48,52 @@ def main(mode="val", gt=False):
         OLD_PARQUET_FILES = "../output/full_train_parquet/*"
     elif MODE == "test":
         OLD_PARQUET_FILES = "../output/full_train_val_parquet/*"
+    elif MODE == "extra":
+        OLD_PARQUET_FILES = "../output/full_train_parquet/*"
     else:
         raise NotImplementedError
-        
+
     MATRIX_FOLDER = "../output/matrices/"
+#     MATRIX_FOLDER = "../output/matrices_2/"
+
+    MODE_ = "val" if MODE == "extra" else MODE
     MATRIX_NAMES = [
-        f"matrix_123_temporal_20_{MODE}",
-        f"matrix_123_type136_20_{MODE}",
-        f"matrix_12__20_{MODE}",
-        f"matrix_123_type0.590.5_20_{MODE}",
-        f"matrix_cpu-90_{MODE}",
-        f"matrix_cpu-95_{MODE}",
-        f"matrix_cpu-99_{MODE}",
-        f"matrix_gpu-116_{MODE}",
-        f"matrix_gpu-115_{MODE}",
-        f"matrix_gpu-93_{MODE}",
-        f"matrix_gpu-217_{MODE}",
-#         f"matrix_gpu-220_{MODE}",
-        f"matrix_gpu-226_{MODE}",
-        f"matrix_gpu-232_{MODE}",
-#         f"matrix_gpu-235_{MODE}",
-        f"matrix_gpu-239_{MODE}",
-        f"matrix_gpu-700_{MODE}",
-        f"matrix_gpu-701_{MODE}",
+        f"matrix_123_temporal_20_{MODE_}",
+        f"matrix_123_type136_20_{MODE_}",
+        f"matrix_12__20_{MODE_}",
+        f"matrix_123_type0.590.5_20_{MODE_}",
+        f"matrix_cpu-90_{MODE_}",
+        f"matrix_cpu-95_{MODE_}",
+        f"matrix_cpu-99_{MODE_}",
+        f"matrix_gpu-116_{MODE_}",
+        f"matrix_gpu-115_{MODE_}",
+        f"matrix_gpu-93_{MODE_}",
+        f"matrix_gpu-217_{MODE_}",
+#         f"matrix_gpu-220_{MODE_}",
+        f"matrix_gpu-226_{MODE_}",
+        f"matrix_gpu-232_{MODE_}",
+#         f"matrix_gpu-235_{MODE_}",
+        f"matrix_gpu-239_{MODE_}",
+        f"matrix_gpu-700_{MODE_}",
+        f"matrix_gpu-701_{MODE_}",
+        f"matrix_gpu-155_{MODE_}",
+        f"matrix_gpu-157_{MODE_}",
     ]
-    
-            
+
     EMBED_PATH = "../output/matrix_factorization/"
     EMBED_NAMES = [
-        f'embed_1-9_64_cartbuy_{MODE}',
-        f'embed_1_64_{MODE}',
-        f'embed_1-5_64_{MODE}',
+        f'embed_1-9_64_cartbuy_{MODE_}',
+        f'embed_1_64_{MODE_}',
+        f'embed_1-5_64_{MODE_}',
     ]
-            
+
     # Chunks
     CHUNK_SIZE = 1_000_000
 
     all_pairs = cudf.read_parquet(CANDIDATE_FILE)
-    
-    if MODE == "val" and "clicks" not in CANDIDATES_VERSION:  # Remove useless sessions for speed-up
-        gt = cudf.read_parquet("../output/val_labels.parquet")
+
+    if MODE != "test" and "clicks" not in CANDIDATES_VERSION:  # Remove useless sessions for speed-up
+        gt = cudf.read_parquet(GT_FILE)
         kept_sessions = gt[gt['type'] != "clicks"].drop('ground_truth', axis=1)
         kept_sessions = kept_sessions.drop_duplicates(subset="session", keep="first")
 
@@ -94,7 +107,10 @@ def main(mode="val", gt=False):
         CHUNK_SIZE = int(CHUNK_SIZE * factor)
 
     all_pairs = all_pairs.sort_values(['session', 'candidates']).reset_index(drop=True)
-    all_pairs['group'] = all_pairs['session'] // (CHUNK_SIZE // 50)
+    if MODE == "extra":
+        all_pairs['group'] = (all_pairs['session'] - all_pairs['session'].min()) // (CHUNK_SIZE // 5)
+    else:
+        all_pairs['group'] = (all_pairs['session'] - all_pairs['session'].min()) // (CHUNK_SIZE // 50)
 
     N_PARTS = len(all_pairs['group'].unique())
     
@@ -225,6 +241,9 @@ def main(mode="val", gt=False):
         numba.cuda.current_context().deallocations.clear()
         gc.collect()
         
+        # W2V Benny features
+        pairs = compute_w2v_features(pairs, PARQUET_FILES, EMBED_PATH + f'word2vec_{MODE_}.emb')
+
         # Rank features
         fts_to_rank = pairs.columns[5:] if MODE == "val" else pairs.columns[2:]
         fts_to_rank = [ft for ft in fts_to_rank if not any([k in ft for k in ["_rank", "_sum", "_max"]])]
@@ -313,7 +332,7 @@ def parse_args():
 if __name__ == "__main__":
     args = parse_args()
     
-    assert args.mode in ["val", "test"]
+    assert args.mode in ["val", "test", "extra"]
     main(args.mode, args.gt)
 
 #     for mode in ["val", "test"]:

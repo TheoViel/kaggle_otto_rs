@@ -2,6 +2,7 @@ import os
 import gc
 import cudf
 import numba
+import pickle
 import datetime
 import numpy as np
 import pandas as pd
@@ -109,7 +110,7 @@ def compute_popularities_new(pairs, sessions, mode="val"):
     else:
         day_map = {28: 0, 29: 0, 30: 1, 31: 2, 1: 3, 2: 4, 3: 5, 4: 6}  # TEST
     
-    sessions["day"] = cudf.to_datetime(sessions['ts'], unit='s').dt.day
+    sessions["day"] = (cudf.to_datetime(sessions['ts'], unit='s') + cudf.DateOffset(hours=2)).dt.day
     sessions["day"] = sessions["day"].map(day_map)
     sessions["hour"] = (sessions['ts'] // (60 * 60)) * (60 * 60)
     sessions["hour"] = cudf.to_datetime(sessions['hour'], unit='s')
@@ -122,15 +123,18 @@ def compute_popularities_new(pairs, sessions, mode="val"):
         on="session",
     )
 
-    pairs["day"] = cudf.to_datetime(pairs['ts'], unit='s').dt.day
+    pairs["day"] = (cudf.to_datetime(pairs['ts'], unit='s') + cudf.DateOffset(hours=2)).dt.day
     pairs["day"] = pairs["day"].map(day_map)
     pairs["hour"] = (pairs['ts'] // (60 * 60)) * (60 * 60)
     pairs["hour"] = cudf.to_datetime(pairs['hour'], unit='s')
 
     for class_idx, c in enumerate(CLASSES):
+#         if class_idx == 0:
+#             print('SKIP CLIC')
+#             continue
         print(f"-> Popularity for {c}")
         # Week        
-        if os.path.exists(f"../output/popularities/pop_d_{c}_{mode}.parquet"):
+        if os.path.exists(f"../output/popularities/pop_w_{c}_{mode}.parquet"):
             popularity_week = cudf.read_parquet(f"../output/popularities/pop_w_{c}_{mode}.parquet")
         else:
             popularity_week = sessions[["aid", "count"]][sessions["type"] == class_idx].groupby("aid").sum()
@@ -282,6 +286,93 @@ def compute_matrix_factorization_features(pairs, embed, weights):
     fts = fts.sort_values(["session", "candidates"]).reset_index(drop=True)
     
     return fts
+
+
+def benny_weights(df):
+    df_type = cudf.DataFrame({
+        'type': [0, 1, 2],
+        'type_': [1, 2, 3],
+        'type_mp': [0.5, 9, 0.5]
+    })
+
+    df = df.merge(df_type, how='left', on='type')
+    df = df.sort_values(['session', 'ts'], ascending=[True, False])
+
+    df["session_len"] = df.groupby('session').transform("count")['aid']
+
+    df['rank'] = 1
+    df['rank'] = df.groupby(['session'])['rank'].cumsum().astype("int32")
+    df['last'] = (df['rank'] == 1).astype("uint8")
+
+    min_val = (2 ** 0.1-1)
+    max_val = (2 ** 1-1)
+    df['wgt_1'] = (min_val + (max_val - min_val) * (df['rank'] - 1) / df['session_len']) * df['type_mp']
+    min_val = (2 ** 0.5-1)
+    max_val = (2 ** 1-1)
+    df['wgt_2'] = (min_val + (max_val - min_val) * (df['rank'] - 1) / df['session_len']) * df['type_mp']
+    
+    df['wgt_1'] = df['wgt_1'].astype("float32")
+    df['wgt_2'] = df['wgt_2'].astype("float32")
+    df['type_mp'] = df['type_mp'].astype("float32")
+    
+    return df.drop(['type_', "session_len"], axis=1)
+
+
+def compute_w2v_features(pairs, parquet_files, embed_file):
+    print(f'-> Computing Word2Vec similarities from matrix {embed_file.split("/")[-1]}')
+    pairs = pairs.sort_values(['session', 'candidates'], ignore_index=True)
+
+    sessions = load_sessions(parquet_files)
+    sessions = benny_weights(sessions)
+    
+    df_pairs = pairs[["session", "candidates"]].merge(sessions, how="left", on="session")
+    
+    emb = pickle.load(open(embed_file, 'rb'))
+    embed = np.zeros((np.max(list(emb.keys())) + 1, 50), dtype=np.float32)
+    for k in emb.keys():
+        embed[k] = emb[k]
+    embed /= np.reshape(np.sqrt(np.sum(embed * embed, axis=1)), (-1, 1)) + 1e-12
+    
+    df_pairs['sim'] = np.sum(embed[df_pairs['candidates'].to_pandas().values] * embed[df_pairs['aid'].to_pandas().values], axis=1)
+    df_pairs.loc[df_pairs['sim'] < 0.5, 'sim'] = 0
+    
+    df_pairs['sim_1'] = df_pairs['sim'].values
+    df_pairs['sim_2'] = df_pairs['sim'].values
+    df_pairs['sim_3'] = (df_pairs['sim'] > 0).astype('int')
+    df_pairs['sim_wgt_1'] = df_pairs['sim']*df_pairs['wgt_1']
+    df_pairs['sim_wgt_2'] = df_pairs['sim']*df_pairs['wgt_2']
+    df_pairs['sim_last'] = df_pairs['sim']*df_pairs['last']
+    df_pairs['sim_type_1'] = df_pairs['sim']*df_pairs['type_mp']
+
+    df_pairs = df_pairs.groupby([
+        'session',
+        'candidates'
+    ]).agg({
+        'sim_1': 'max',
+        'sim_2': 'sum',
+        'sim_3': 'sum',
+        'sim_wgt_1': 'sum',
+        'sim_wgt_2': 'sum',
+        'sim_last': 'max',
+        'sim_type_1': 'sum'
+    })
+    for col in ['sim_2', 'sim_wgt_1', 'sim_wgt_2', 'sim_type_1']:
+        df_pairs[col] = df_pairs[col] / (1 + df_pairs['sim_3'])
+        
+    df_pairs = df_pairs.reset_index().sort_values(['session', 'candidates'], ignore_index=True)
+    assert (pairs["candidates"] == df_pairs["candidates"]).all()
+    df_pairs.drop(['session', 'candidates'], axis=1, inplace=True)
+    
+    for c in df_pairs.columns:
+        if "sim_3" in c:
+            df_pairs[c] = df_pairs[c].astype("int32")
+        else:
+            df_pairs[c] = df_pairs[c].astype("float32")
+
+    df_pairs.columns = [f"w2v_{c}" for c in list(df_pairs.columns)]
+    pairs = cudf.concat([pairs, df_pairs], axis=1)
+
+    return pairs
 
 
 def save_by_chunks(pairs, folder, part=0):

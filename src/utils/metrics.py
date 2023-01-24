@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-# from sklearn.metrics import *
+from params import GT_FILE
 
 
 def get_hits(prediction, labels, k=20):
@@ -81,8 +81,8 @@ def evaluate(df_val, target, verbose=1):
     except:
         pass
     preds['candidates'] = preds['candidates'].apply(lambda x: x[:20])
-    
-    gt = pd.read_parquet("../output/val_labels.parquet")
+
+    gt = pd.read_parquet(GT_FILE)
     preds = preds.merge(gt[gt["type"] == target[3:]].drop("type", axis=1), how="left").rename(
         columns={"ground_truth": target}
     )

@@ -149,7 +149,23 @@ def kfold(regex, test_regex, config, log_folder, debug=False, run=None):
             seed=config.seed,
             no_tqdm=log_folder is not None
         )
-        
+        if config.use_extra:
+            df_extra = load_parquets_cudf_folds(
+                config.extra_regex,
+                pos_ratio=config.pos_ratio,
+                target=config.target,
+                use_gt=True,
+                train_only=True,
+                columns=['session', 'candidates', 'gt_clicks', 'gt_carts', 'gt_orders'] + config.features,
+                max_n=1 if debug else 0,
+                seed=config.seed,
+                no_tqdm=log_folder is not None
+            )
+            if config.extra_prop:
+                df_extra = df_extra.sample(int(config.extra_prop * len(df_train)))
+            print(f'Using {len(df_extra)} extra samples')
+            df_train = pd.concat([df_train, df_extra], ignore_index=True)
+
         if config.pca_components:
             print('Applying PCA')
             pca = PCA(n_components=config.pca_components, random_state=config.seed)

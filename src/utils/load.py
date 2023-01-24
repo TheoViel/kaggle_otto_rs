@@ -8,8 +8,9 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from params import TYPE_LABELS
+from params import TYPE_LABELS, GT_FILE
 from utils.torch import seed_everything
+
 
 def load_parquets_pd(regex):
     dfs = []
@@ -99,7 +100,7 @@ def load_sessions(regexes):
 
 def load_parquets_cudf_folds(
     regex,
-    folds_file,
+    folds_file="",
     fold=0,
     pos_ratio=0,
     target="",
@@ -114,16 +115,20 @@ def load_parquets_cudf_folds(
     seed=42,
     no_tqdm=False,
 ):
-    filtered = target in regex
-    if filtered:
+    already_filtered = target in regex
+    if already_filtered:
         assert use_gt and use_gt_for_val
         print(f'Files were filtered !')
 
-    files = sorted(glob.glob(regex))    
-    folds = cudf.read_csv(folds_file)
+    files = sorted(glob.glob(regex))   
+    folds = cudf.read_csv(folds_file) if folds_file else None
     
     if (use_gt or use_gt_for_val) and target:
-        gt = cudf.read_parquet("../output/val_labels.parquet")
+        if "extra" in regex:
+            GT_FILE = "../output/val_labels_trimmed.parquet"
+        else:
+            GT_FILE = "../output/val_labels.parquet"
+        gt = cudf.read_parquet(GT_FILE)
         kept_sessions = gt[gt['type'] == target[3:]].drop('ground_truth', axis=1)
 
     if probs_file:
@@ -136,8 +141,13 @@ def load_parquets_cudf_folds(
     dfs, dfs_val = [], []
     for idx, file in enumerate(tqdm(files, disable=(max_n>0 or no_tqdm))):
         df = cudf.read_parquet(file, columns=columns)
-        df = df.merge(folds, on="session", how="left")
-        
+        filtered = already_filtered
+
+        if folds is not None:
+            df = df.merge(folds, on="session", how="left")
+        else:
+            df['fold'] = -1
+    
         if not filtered and (use_gt and use_gt_for_val):
             df = df.merge(
                 kept_sessions, on="session", how="left"
@@ -191,6 +201,7 @@ def load_parquets_cudf_folds(
             pos = df.index[df[target] == 1]
 
             seed_everything(fold)
+
             if pos_ratio > 0:
                 try:
                     n_neg = int(df[target].sum() / pos_ratio)
@@ -221,9 +232,6 @@ def load_parquets_cudf_folds(
                 df = df.iloc[pos]
             else:
                 pass
-            
-#             t6 = time.time()
-
             dfs.append(df.drop('gt_*', axis=1).to_pandas())
         else:
             dfs.append(df.to_pandas())
@@ -262,7 +270,7 @@ def prepare_train_val_data(regex, folds_file, pos_ratio=0, target="", train_only
                 df_train['gt_*'] = df_train[['gt_carts', "gt_clicks", "gt_orders"]].max(axis=1)
 
                 if use_gt:
-                    gt = cudf.read_parquet("../output/val_labels.parquet")
+                    gt = cudf.read_parquet(GT_FILE)
                     kept_sessions = gt[gt['type'] == target[3:]].drop('ground_truth', axis=1)
                     df_train = df_train.merge(kept_sessions, on="session", how="left").dropna(0).drop('type', axis=1).reset_index(drop=True)
 
@@ -300,7 +308,7 @@ def prepare_train_val_data(regex, folds_file, pos_ratio=0, target="", train_only
 
         
 def filter_dfs(regex, target=""):
-    gt = cudf.read_parquet("../output/val_labels.parquet")
+    gt = cudf.read_parquet(GT_FILE)
     kept_sessions = gt[gt['type'] == target[3:]].drop('ground_truth', axis=1)
     
     save_folder = regex.rsplit('/', 1)[0] + "_" + target + "/"
