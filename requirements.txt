@@ -14,3 +14,4 @@ numerize
 nb_black
 pandarallel==1.6.3
 optuna==3.1.0
+lightgbm==3.3.5

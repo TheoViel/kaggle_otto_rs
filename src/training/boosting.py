@@ -12,39 +12,25 @@ from numerize.numerize import numerize
 from utils.torch import seed_everything
 from sklearn.metrics import roc_auc_score
 
-from model_zoo import TRAIN_FCTS, PREDICT_FCTS
+from model_zoo import TRAIN_FCTS, OBJECTIVE_FCTS
 from model_zoo.xgb import objective_xgb
+from inference.predict import predict_batched
 from utils.load import load_parquets_cudf_folds
 from utils.metrics import evaluate
 from utils.plot import plot_importances
 
 
-def optimize(regex, config, log_folder, n_trials=100, fold=0, debug=False, df_train=None, df_val=None, run=None):
+def optimize(df_train, df_val, regex, config, log_folder, n_trials=100, fold=0, debug=False, run=None):
     print(f"\n-------------  Optimizing {config.model.upper()} Model  -------------\n")
     seed_everything(config.seed)
-
-    if df_train is None or df_val is None:
-        df_train, df_val = load_parquets_cudf_folds(
-            regex,
-            config.folds_file,
-            fold=fold,
-            pos_ratio=config.pos_ratio,
-            target=config.target,
-            use_gt=config.use_gt_sessions,
-            use_gt_for_val=True,
-            columns=['session', 'candidates', 'gt_clicks', 'gt_carts', 'gt_orders'] + config.features,
-            max_n=5 if debug else 0,
-            probs_file=config.probs_file if config.restrict_all else "",
-            probs_mode=config.probs_mode if config.restrict_all else "",
-            seed=config.seed,
-            no_tqdm=log_folder is not None
-        )
 
     print(f"\n    -> {numerize(len(df_train))} training candidates")
     print(f"    -> {numerize(len(df_val))} validation candidates\n")
 
     study = optuna.create_study(direction="maximize")
-    objective = lambda x: objective_xgb(
+
+    objective_fct = OBJECTIVE_FCTS[config.model]
+    objective = lambda x: objective_fct(
         x,
         df_train,
         df_val,
@@ -104,10 +90,10 @@ def train(df_train, df_val, regex, config, log_folder=None, fold=0, debug=False)
         ft_imp = None
         
     if config.mode == "test":
-        return df_val, ft_imp, model
+        return df_val, ft_imp
 
     if log_folder is None:
-        return df_val, ft_imp, model
+        return df_val, ft_imp
 
     # Save model
     if config.model == "xgb":
@@ -120,7 +106,7 @@ def train(df_train, df_val, regex, config, log_folder=None, fold=0, debug=False)
     else:   # catboost, verif
         model.save_model(log_folder + f"{config.model}_{fold}.txt")
 
-    return df_val, ft_imp, model
+    return df_val, ft_imp
 
 
 def kfold(regex, test_regex, config, log_folder, debug=False, run=None):
@@ -149,8 +135,6 @@ def kfold(regex, test_regex, config, log_folder, debug=False, run=None):
             seed=config.seed,
             no_tqdm=log_folder is not None
         )
-#         if config.target == "gt_carts":
-#             df_val = df_val.head(4000000)
 
         if config.use_extra:
             df_extra = load_parquets_cudf_folds(
@@ -169,41 +153,22 @@ def kfold(regex, test_regex, config, log_folder, debug=False, run=None):
             print(f'Using {len(df_extra)} extra samples')
             df_train = pd.concat([df_train, df_extra], ignore_index=True)
 
-        if config.pca_components:
-            print('Applying PCA')
-            pca = PCA(n_components=config.pca_components, random_state=config.seed)
+        if config.model == "lgbm":
+            df_train['has_gt'] = df_train.groupby('session')[config.target].transform("max")
+            df_train = df_train[df_train['has_gt'] == 1].drop('has_gt', axis=1).reset_index(drop=True)
 
-            pca_features = [f'pca_{i}' for i in range(config.pca_components)]
-            pca.fit(
-                pd.concat([df_train[config.features], df_val[config.features]], axis=0, ignore_index=True)
-            )
-
-            new_train = pca.transform(df_train[config.features])
-            new_train = pd.DataFrame(new_train, columns=pca_features)
-            df_train = pd.concat([df_train.drop(config.features, axis=1), new_train], axis=1)
-
-            new_val = pca.transform(df_val[config.features])
-            new_val = pd.DataFrame(new_val, columns=pca_features)
-            df_val = pd.concat([df_val.drop(config.features, axis=1), new_val], axis=1)
-
-            config.features = pca_features
-        
-        try:
-            train_sessions = set(list(df_train["session"].unique()))
-            val_sessions = set(list(df_val["session"].unique()))
-            print('Train / val session inter', len(train_sessions.intersection(val_sessions)))
-        except:
-            pass
+            assert len(df_val['session'].unique()) == len(df_val[df_val["session"] != df_val["session"].shift(1).fillna('')])
+            assert len(df_train['session'].unique()) == len(df_train[df_train["session"] != df_train["session"].shift(1).fillna('')])
 
         if fold in config.folds_optimize:
             study = optimize(
+                df_train,
+                df_val,
                 regex,
                 config,
                 log_folder,
                 n_trials=1 if debug else config.n_trials,
                 debug=debug,
-                df_train=df_train,
-                df_val=df_val,
                 fold=fold,
                 run=run,
             )
@@ -211,23 +176,8 @@ def kfold(regex, test_regex, config, log_folder, debug=False, run=None):
             
             if run is not None:
                 run[f"fold_{fold}/best_params/"] = study.best_params
-
-#         if config.use_gt_pos:
-#             df_train_gt = load_parquets_cudf_folds(
-#                 config.gt_regex,
-#                 config.folds_file,
-#                 fold=fold,
-#                 pos_ratio=-1,
-#                 target=config.target,
-#                 use_gt=config.use_gt_sessions,
-#                 train_only=True,
-#                 columns=['session', 'candidates', 'gt_clicks', 'gt_carts', 'gt_orders'] + config.features,
-#                 max_n=3 if debug else 0
-#             )
-#             df_train = pd.concat([df_train, df_train_gt], ignore_index=True)
-#             df_train = df_train.drop_duplicates(subset=['session', 'candidates'], keep="first").reset_index(drop=True)
             
-        df_val, ft_imp, model = train(
+        df_val, ft_imp = train(
             df_train,
             df_val,
             regex,
@@ -247,7 +197,7 @@ def kfold(regex, test_regex, config, log_folder, debug=False, run=None):
         
         if log_folder is None:
             return ft_imp
-        
+
         if run is not None:
             score = evaluate(df_val, config.target, verbose=0)
             scores.append(score)
@@ -259,16 +209,26 @@ def kfold(regex, test_regex, config, log_folder, debug=False, run=None):
         del df_train, df_val, ft_imp
         numba.cuda.current_context().deallocations.clear()
         gc.collect()
-        
-        predict_fct = PREDICT_FCTS[config.model]
-        df_test = predict_fct(
+                
+        if config.model == "xgb":
+            model = cuml.ForestInference.load(
+                filename=log_folder + f"xgb_{fold}.json",
+                model_type='xgboost_json',
+            )
+        else:
+            model = cuml.ForestInference.load(
+                filename=log_folder + f"lgbm_{fold}.txt",
+                model_type='lightgbm',
+            )
+
+        df_test = predict_batched(
             model,
             test_regex,
             config.features,
             debug=debug,
             probs_file=config.probs_file if config.restrict_all else "",
             probs_mode=config.probs_mode if config.restrict_all else "",
-            ranker=("rank" in config.params["objective"]),
+            ranker=("rank" in config.params.get("objective", "")),
             no_tqdm=True,
         )
         

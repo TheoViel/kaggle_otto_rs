@@ -318,20 +318,27 @@ def benny_weights(df):
     return df.drop(['type_', "session_len"], axis=1)
 
 
-def compute_w2v_features(pairs, parquet_files, embed_file):
-    print(f'-> Computing Word2Vec similarities from matrix {embed_file.split("/")[-1]}')
+def load_embed(embed_file):
+    if not embed_file.endswith('.npy'):
+        emb = pickle.load(open(embed_file, 'rb'))
+        embed = np.zeros((np.max(list(emb.keys())) + 1, 50), dtype=np.float32)
+        for k in emb.keys():
+            embed[k] = emb[k]
+    else:
+        embed = np.load(embed_file)
+
+    embed /= np.reshape(np.sqrt(np.sum(embed * embed, axis=1)), (-1, 1)) + 1e-12
+    embed = np.concatenate((embed, np.zeros((1, embed.shape[1])))).astype(np.float32)
+    return embed
+
+
+def compute_w2v_features(pairs, parquet_files, embed, name="w2v"):
     pairs = pairs.sort_values(['session', 'candidates'], ignore_index=True)
 
     sessions = load_sessions(parquet_files)
     sessions = benny_weights(sessions)
     
     df_pairs = pairs[["session", "candidates"]].merge(sessions, how="left", on="session")
-    
-    emb = pickle.load(open(embed_file, 'rb'))
-    embed = np.zeros((np.max(list(emb.keys())) + 1, 50), dtype=np.float32)
-    for k in emb.keys():
-        embed[k] = emb[k]
-    embed /= np.reshape(np.sqrt(np.sum(embed * embed, axis=1)), (-1, 1)) + 1e-12
     
     df_pairs['sim'] = np.sum(embed[df_pairs['candidates'].to_pandas().values] * embed[df_pairs['aid'].to_pandas().values], axis=1)
     df_pairs.loc[df_pairs['sim'] < 0.5, 'sim'] = 0
@@ -369,7 +376,7 @@ def compute_w2v_features(pairs, parquet_files, embed_file):
         else:
             df_pairs[c] = df_pairs[c].astype("float32")
 
-    df_pairs.columns = [f"w2v_{c}" for c in list(df_pairs.columns)]
+    df_pairs.columns = [f"{name}_{c}" for c in list(df_pairs.columns)]
     pairs = cudf.concat([pairs, df_pairs], axis=1)
 
     return pairs
@@ -379,7 +386,7 @@ def save_by_chunks(pairs, folder, part=0):
     print(f"-> Saving chunks to {folder}   (part #{part})")
     os.makedirs(folder, exist_ok=True)
 
-    pairs["group"] = pairs["session"] // 100000
+    pairs["group"] = pairs["session"] // 50000
 
     for i, (_, df) in enumerate(pairs.groupby("group")):
         df.drop("group", axis=1, inplace=True)
