@@ -99,10 +99,10 @@ def objective_xgb(
         max_depth=trial.suggest_int("max_depth", 5, 10),
         subsample=trial.suggest_float("subsample", 0.4, 1),
         colsample_bytree=trial.suggest_float("colsample_bytree", 0.5, 1),
-#         reg_alpha=trial.suggest_float("reg_alpha", 0.01, 10, log=True),
-#         reg_lambda=trial.suggest_float("reg_lambda", 0.01, 10, log=True),
-        reg_alpha=trial.suggest_float("reg_alpha", 1e-5, 0.1, log=True),
-        reg_lambda=trial.suggest_float("reg_lambda", 1e-6, 1, log=True),
+        reg_alpha=trial.suggest_float("reg_alpha", 0.01, 100, log=True),
+        reg_lambda=trial.suggest_float("reg_lambda", 0.01, 100, log=True),
+#         reg_alpha=trial.suggest_float("reg_alpha", 1e-5, 1, log=True),
+#         reg_lambda=trial.suggest_float("reg_lambda", 1e-5, 1, log=True),
 #         scale_pos_weight=trial.suggest_float("scale_pos_weight", 1, 5),
 #         min_child_weight=trial.suggest_float("min_child_weight", 0, 1),
     )
@@ -246,7 +246,7 @@ def predict_batched_xgb(model, dfs_regex, features, folds_file="", fold=0, probs
         ], ignore_index=True)
         preds['pred_rank'] = preds.groupby('session').rank(ascending=False)['pred']
         assert len(preds)
-        
+
     dfs = []
     for path in tqdm(glob.glob(dfs_regex), disable=no_tqdm):
         dfg = cudf.read_parquet(path, columns=features + (cols[:2] if test else cols[:5]))
@@ -267,12 +267,17 @@ def predict_batched_xgb(model, dfs_regex, features, folds_file="", fold=0, probs
 #             group = dfg[['session', 'candidates']].groupby('session').size().to_pandas().values
 #             dval = xgb.DMatrix(data=dfg[features], group=group)
 #         else:
-        dval = xgb.DMatrix(data=dfg[features])
 
-        dfg['pred'] = model.predict(dval)
+        try:
+            dfg['pred'] = model.predict(dfg[features])
+        except:
+            dval = xgb.DMatrix(data=dfg[features])
+            dfg['pred'] = model.predict(dval)
+            del dval
+
         dfs.append(dfg[[c for c in cols if c in dfg.columns]])
 
-        del dval, dfg
+        del dfg
         numba.cuda.current_context().deallocations.clear()
         gc.collect()
         

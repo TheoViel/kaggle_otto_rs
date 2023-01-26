@@ -165,11 +165,19 @@ def load_parquets_cudf_folds(
         if not train_only:
             df_val = df[df['fold'] == fold].reset_index(drop=True)
             
-            if use_gt_for_val and not filtered:
-                df_val = df_val.merge(
-                    kept_sessions, on="session", how="left"
-                ).dropna(0).drop('type', axis=1).reset_index(drop=True)
-        
+            if use_gt_for_val:
+                df_val['has_gt'] = df_val.groupby('session')[target].transform("max")
+                df_val = cudf.concat([
+                    df_val[df_val['has_gt'] == 1],
+                    df_val[df_val['has_gt'] == 0].drop_duplicates(subset='session', keep='first'),
+                ], ignore_index=True)
+                df_val.drop('has_gt', axis=1, inplace=True)
+
+                if not filtered:
+                    df_val = df_val.merge(
+                        kept_sessions, on="session", how="left"
+                    ).dropna(0).drop('type', axis=1).reset_index(drop=True)
+
 #             if probs_file:
 #                 assert "rank" in probs_mode
 #                 df_val = df_val.merge(preds, how="left", on=["session", "candidates"])
@@ -180,6 +188,7 @@ def load_parquets_cudf_folds(
             if "clicks" in target:  # Use 10% of the sessions for clicks
                 df_val = df_val[df_val['session'] < df_val['session'].quantile(0.1)]
 
+            df_val = df_val.sort_values(['session', 'candidates'], ignore_index=True)
             dfs_val.append(df_val.to_pandas())
 
         df = df[df['fold'] != fold].reset_index(drop=True)
@@ -190,8 +199,6 @@ def load_parquets_cudf_folds(
             continue
         
         if target:  # Subsample
-            df['gt_*'] = df[['gt_carts', "gt_clicks", "gt_orders"]].max(axis=1)
-            
             if use_gt and not filtered:
                 df = df.merge(
                     kept_sessions, on="session", how="left"
@@ -232,8 +239,10 @@ def load_parquets_cudf_folds(
                 df = df.iloc[pos]
             else:
                 pass
-            dfs.append(df.drop('gt_*', axis=1).to_pandas())
+            df = df.sort_values(['session', 'candidates'], ignore_index=True)
+            dfs.append(df.to_pandas())
         else:
+            df = df.sort_values(['session', 'candidates'], ignore_index=True)
             dfs.append(df.to_pandas())
         if max_n and (idx + 1) >= max_n:
             break

@@ -23,11 +23,12 @@ def main(mode="val", gt=False):
 
     # Params
     MODE = mode
-#     CANDIDATES_VERSION = "cv6-tv6"  # BOOSTED
-    CANDIDATES_VERSION = "cv7-tv5"
+#     CANDIDATES_VERSION = "cv7-tv5"
+#     CANDIDATES_VERSION = "cv8-tv5"
+    CANDIDATES_VERSION = "cv9-tv5"
 #     CANDIDATES_VERSION = "clicks_cv3-tv5"
 
-    FEATURES_VERSION = "11"
+    FEATURES_VERSION = "12"
 
     SUFFIX = f"{CANDIDATES_VERSION}.{FEATURES_VERSION}"
     CANDIDATE_FILE = f'../output/candidates/candidates_{CANDIDATES_VERSION}_{MODE}.parquet'
@@ -82,13 +83,15 @@ def main(mode="val", gt=False):
 
     EMBED_PATH = "../output/matrix_factorization/"
     EMBED_NAMES = [
-        f'embed_1-9_64_cartbuy_{MODE_}',
-        f'embed_1_64_{MODE_}',
-        f'embed_1-5_64_{MODE_}',
+        f'embed_1-9_64_cartbuy_{MODE_}.npy',
+        f'embed_1_64_{MODE_}.npy',
+        f'embed_1-5_64_{MODE_}.npy',
+        f"embed_giba_{MODE_}.npy",
+        f'word2vec_{MODE_}.emb',
     ]
 
     # Chunks
-    CHUNK_SIZE = 1_000_000
+    CHUNK_SIZE = 500_000
 
     all_pairs = cudf.read_parquet(CANDIDATE_FILE)
 
@@ -108,9 +111,9 @@ def main(mode="val", gt=False):
 
     all_pairs = all_pairs.sort_values(['session', 'candidates']).reset_index(drop=True)
     if MODE == "extra":
-        all_pairs['group'] = (all_pairs['session'] - all_pairs['session'].min()) // (CHUNK_SIZE // 5)
+        all_pairs['group'] = (all_pairs['session'] - all_pairs['session'].min()) // (CHUNK_SIZE // 2)
     else:
-        all_pairs['group'] = (all_pairs['session'] - all_pairs['session'].min()) // (CHUNK_SIZE // 50)
+        all_pairs['group'] = (all_pairs['session'] - all_pairs['session'].min()) // CHUNK_SIZE
 
     N_PARTS = len(all_pairs['group'].unique())
     
@@ -152,18 +155,14 @@ def main(mode="val", gt=False):
         
         # Matrix factorization features
         for embed_name in EMBED_NAMES:
-            print(f'-> Features from matrix {embed_name}')
             name = embed_name.rsplit('_', 1)[0]
+            print(f'-> Features from matrix {name}')
 
-            # Load embeddings
-            embed_path = os.path.join(EMBED_PATH, embed_name + ".npy")
-            embed = np.load(embed_path)
-            embed /= np.reshape(np.sqrt(np.sum(embed * embed, axis=1)), (-1, 1))
-            embed = np.concatenate((embed, np.zeros((1, embed.shape[1])))).astype(np.float32)
+            embed = load_embed(os.path.join(EMBED_PATH, embed_name))
 
             # Retrieve sessions
             sessions = load_sessions(PARQUET_FILES)
-            if "_cartbuy" in embed_path:
+            if "_cartbuy" in embed_name:
                 sessions = sessions[sessions['type'] != 0]
             sessions = sessions.sort_values(['session', "ts"], ascending=[True, False])
 
@@ -187,7 +186,7 @@ def main(mode="val", gt=False):
                 pairs.drop(f'last_{n}', axis=1, inplace=True)
 
             weights_noclick = None
-            if "_cartbuy" in embed_path:
+            if "_cartbuy" in embed_name:
                 sessions = load_sessions(PARQUET_FILES)
                 weights_noclick = compute_weights(sessions, no_click=True)
 
@@ -205,12 +204,18 @@ def main(mode="val", gt=False):
 
             for c in fts.columns[2:]:
                 pairs[f"{name}_{re.sub('w_', '', c)}"] = fts[c].values
+            pairs.drop('aid', axis=1, inplace=True)
 
-            del fts, sessions, weights_noclick, df_s, embed
+            del fts, sessions, weights_noclick, df_s
             numba.cuda.current_context().deallocations.clear()
             gc.collect()
 
-            pairs.drop('aid', axis=1, inplace=True)
+            # W2V Benny features
+            pairs = compute_w2v_features(pairs, PARQUET_FILES, embed, name)
+            
+            del embed
+            numba.cuda.current_context().deallocations.clear()
+            gc.collect()
 
         # Covisitation features
         sessions = load_sessions(PARQUET_FILES)
@@ -240,9 +245,6 @@ def main(mode="val", gt=False):
         del sessions, weights
         numba.cuda.current_context().deallocations.clear()
         gc.collect()
-        
-        # W2V Benny features
-        pairs = compute_w2v_features(pairs, PARQUET_FILES, EMBED_PATH + f'word2vec_{MODE_}.emb')
 
         # Rank features
         fts_to_rank = pairs.columns[5:] if MODE == "val" else pairs.columns[2:]
@@ -304,7 +306,7 @@ def main(mode="val", gt=False):
         numba.cuda.current_context().deallocations.clear()
         gc.collect()
 
-#         break
+        break
 
 
 def parse_args():
