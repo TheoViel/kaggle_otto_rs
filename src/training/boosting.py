@@ -153,12 +153,12 @@ def kfold(regex, test_regex, config, log_folder, debug=False, run=None):
             print(f'Using {len(df_extra)} extra samples')
             df_train = pd.concat([df_train, df_extra], ignore_index=True)
 
-        if config.model == "lgbm":
-            df_train['has_gt'] = df_train.groupby('session')[config.target].transform("max")
-            df_train = df_train[df_train['has_gt'] == 1].drop('has_gt', axis=1).reset_index(drop=True)
+#         if config.model == "lgbm":
+#             df_train['has_gt'] = df_train.groupby('session')[config.target].transform("max")
+#             df_train = df_train[df_train['has_gt'] == 1].drop('has_gt', axis=1).reset_index(drop=True)
 
-            assert len(df_val['session'].unique()) == len(df_val[df_val["session"] != df_val["session"].shift(1).fillna('')])
-            assert len(df_train['session'].unique()) == len(df_train[df_train["session"] != df_train["session"].shift(1).fillna('')])
+#             assert len(df_val['session'].unique()) == len(df_val[df_val["session"] != df_val["session"].shift(1).fillna('')])
+#             assert len(df_train['session'].unique()) == len(df_train[df_train["session"] != df_train["session"].shift(1).fillna('')])
 
         if fold in config.folds_optimize:
             study = optimize(
@@ -221,25 +221,25 @@ def kfold(regex, test_regex, config, log_folder, debug=False, run=None):
                 model_type='lightgbm',
             )
 
-        df_test = predict_batched(
-            model,
-            test_regex,
-            config.features,
-            debug=debug,
-            probs_file=config.probs_file if config.restrict_all else "",
-            probs_mode=config.probs_mode if config.restrict_all else "",
-            ranker=("rank" in config.params.get("objective", "")),
-            no_tqdm=True,
-        )
-        
-        print('\n -> Saving test predictions \n')
-        df_test[['session', 'candidates']] = df_test[['session', 'candidates']].astype('int32')
-        df_test['pred'] = df_test['pred'].astype('float32')
-        df_test[['session', 'candidates', 'pred']].to_parquet(log_folder + f"df_test_{fold}.parquet")
+        if len(glob.glob(test_regex)):
+            df_test = predict_batched(
+                model,
+                test_regex,
+                config.features,
+                debug=debug,
+                probs_file=config.probs_file if config.restrict_all else "",
+                probs_mode=config.probs_mode if config.restrict_all else "",
+                ranker=("rank" in config.params.get("objective", "")),
+                no_tqdm=True,
+            )
+            print('\n -> Saving test predictions \n')
+            df_test[['session', 'candidates']] = df_test[['session', 'candidates']].astype('int32')
+            df_test['pred'] = df_test['pred'].astype('float32')
+            df_test[['session', 'candidates', 'pred']].to_parquet(log_folder + f"df_test_{fold}.parquet")
 
-        del df_test, model
-        numba.cuda.current_context().deallocations.clear()
-        gc.collect()
+            del df_test, model
+            numba.cuda.current_context().deallocations.clear()
+            gc.collect()
 
     ft_imps = pd.concat(ft_imps).reset_index().groupby('index').mean()
     if log_folder is not None:

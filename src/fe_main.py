@@ -23,9 +23,9 @@ def main(mode="val", gt=False):
 
     # Params
     MODE = mode
-#     CANDIDATES_VERSION = "cv7-tv5"
+    CANDIDATES_VERSION = "cv7+-tv5"
 #     CANDIDATES_VERSION = "cv8-tv5"
-    CANDIDATES_VERSION = "cv9-tv5"
+#     CANDIDATES_VERSION = "cv9-tv5"
 #     CANDIDATES_VERSION = "clicks_cv3-tv5"
 
     FEATURES_VERSION = "12"
@@ -47,10 +47,13 @@ def main(mode="val", gt=False):
 
     if MODE == "val":
         OLD_PARQUET_FILES = "../output/full_train_parquet/*"
+        CHUNK_SIZE = 50_000
     elif MODE == "test":
         OLD_PARQUET_FILES = "../output/full_train_val_parquet/*"
+        CHUNK_SIZE = 50_000
     elif MODE == "extra":
         OLD_PARQUET_FILES = "../output/full_train_parquet/*"
+        CHUNK_SIZE = 200_000
     else:
         raise NotImplementedError
 
@@ -91,8 +94,6 @@ def main(mode="val", gt=False):
     ]
 
     # Chunks
-    CHUNK_SIZE = 500_000
-
     all_pairs = cudf.read_parquet(CANDIDATE_FILE)
 
     if MODE != "test" and "clicks" not in CANDIDATES_VERSION:  # Remove useless sessions for speed-up
@@ -111,7 +112,7 @@ def main(mode="val", gt=False):
 
     all_pairs = all_pairs.sort_values(['session', 'candidates']).reset_index(drop=True)
     if MODE == "extra":
-        all_pairs['group'] = (all_pairs['session'] - all_pairs['session'].min()) // (CHUNK_SIZE // 2)
+        all_pairs['group'] = (all_pairs['session'] - all_pairs['session'].min()) // CHUNK_SIZE
     else:
         all_pairs['group'] = (all_pairs['session'] - all_pairs['session'].min()) // CHUNK_SIZE
 
@@ -305,8 +306,6 @@ def main(mode="val", gt=False):
         del pairs, sessions_fts, sessions, n_clicks, n_views, n_carts, n_orders
         numba.cuda.current_context().deallocations.clear()
         gc.collect()
-
-        break
 
 
 def parse_args():

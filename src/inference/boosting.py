@@ -8,33 +8,40 @@ import xgboost
 import pandas as pd
 
 from utils.logger import Config
-from model_zoo import PREDICT_FCTS
+from inference.predict import predict_batched
 from utils.load import load_parquets_cudf_folds
 from utils.metrics import evaluate
 
 
-def xgb_inference(regex, test_regex, log_folder, debug=False, save=True):
+def inference(regex, test_regex, log_folder, debug=False, save=True):
     config = Config(json.load(open(log_folder + "config.json", "r")))
     
     dfs_val = []
     for fold in range(config.k):
         if fold not in config.selected_folds:
             continue
+        if fold == 0 or fold == 2:
+            continue
         if f"xgb_{fold}.json" not in os.listdir(log_folder):
             continue
 
         print(f"\n -> Fold {fold + 1}\n")
 
-        model = cuml.ForestInference.load(
-            filename=log_folder + f"xgb_{fold}.json",
-            model_type='xgboost_json',
-        )
-        predict_fct = PREDICT_FCTS[config.model]
+        if config.model == "xgb":
+            model = cuml.ForestInference.load(
+                filename=log_folder + f"xgb_{fold}.json",
+                model_type='xgboost_json',
+            )
+        else:
+            model = cuml.ForestInference.load(
+                filename=log_folder + f"lgbm_{fold}.txt",
+                model_type='lightgbm',
+            )
 
         print('- Val data')
         
         if regex is not None:
-            df_val = predict_fct(
+            df_val = predict_batched(
                 model,
                 regex,
                 config.features,

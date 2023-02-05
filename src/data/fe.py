@@ -382,14 +382,12 @@ def compute_w2v_features(pairs, parquet_files, embed, name="w2v"):
     return pairs
 
 
-def save_by_chunks(pairs, folder, part=0):
+def save_by_chunks(pairs, folder, part=0, chunk_size=50000):
     print(f"-> Saving chunks to {folder}   (part #{part})")
     os.makedirs(folder, exist_ok=True)
 
-    pairs["group"] = pairs["session"] // 50000
+    pairs["group"] = pairs["session"] // chunk_size
 
     for i, (_, df) in enumerate(pairs.groupby("group")):
         df.drop("group", axis=1, inplace=True)
-        df.to_parquet(os.path.join(folder, f"{part}_{i:03d}.parquet"))
-
-        
+        df.to_pandas().to_parquet(os.path.join(folder, f"{part}_{i:04d}.parquet"))

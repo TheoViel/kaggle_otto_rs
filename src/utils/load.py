@@ -115,7 +115,7 @@ def load_parquets_cudf_folds(
     seed=42,
     no_tqdm=False,
 ):
-    already_filtered = target in regex
+    already_filtered = target in regex or "clicks" in target
     if already_filtered:
         assert use_gt and use_gt_for_val
         print(f'Files were filtered !')
@@ -165,6 +165,9 @@ def load_parquets_cudf_folds(
         if not train_only:
             df_val = df[df['fold'] == fold].reset_index(drop=True)
             
+            if "clicks" in target:  # Use 10% of the sessions for clicks
+                df_val = df_val[df_val['session'] < df_val['session'].quantile(0.1)]
+
             if use_gt_for_val:
                 df_val['has_gt'] = df_val.groupby('session')[target].transform("max")
                 df_val = cudf.concat([
@@ -172,6 +175,9 @@ def load_parquets_cudf_folds(
                     df_val[df_val['has_gt'] == 0].drop_duplicates(subset='session', keep='first'),
                 ], ignore_index=True)
                 df_val.drop('has_gt', axis=1, inplace=True)
+                
+                if "carts" in target:  # Use 10% of the sessions for clicks
+                    df_val = df_val[df_val['session'] < df_val['session'].quantile(0.5)]
 
                 if not filtered:
                     df_val = df_val.merge(
@@ -184,9 +190,6 @@ def load_parquets_cudf_folds(
 #                 max_rank = int(probs_mode.split('_')[1])
 #                 df_val = df_val[df_val["pred_rank"] <= max_rank]
 #                 df_val.drop(['pred', 'pred_rank'], axis=1, inplace=True)
-
-            if "clicks" in target:  # Use 10% of the sessions for clicks
-                df_val = df_val[df_val['session'] < df_val['session'].quantile(0.1)]
 
             df_val = df_val.sort_values(['session', 'candidates'], ignore_index=True)
             dfs_val.append(df_val.to_pandas())
