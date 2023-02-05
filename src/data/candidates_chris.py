@@ -34,14 +34,14 @@ def load_parquets(regex):
     dfs = []
     for e, chunk_file in enumerate(glob.glob(regex)):
         chunk = cudf.read_parquet(chunk_file)
-        
+
         chunk.ts = (chunk.ts / 1000).astype("int32")
         chunk["type"] = chunk["type"].map(TYPE_LABELS).astype("int8")
-    
+
         chunk = chunk.sort_values(["session", "ts"])
-        chunk['d'] = chunk.groupby('session').ts.diff()
-        chunk['d'] = (chunk["d"] > 60*60*2).astype('int16').fillna(0)
-        chunk['d'] = chunk.groupby('session').d.cumsum()
+        chunk["d"] = chunk.groupby("session").ts.diff()
+        chunk["d"] = (chunk["d"] > 60 * 60 * 2).astype("int16").fillna(0)
+        chunk["d"] = chunk.groupby("session").d.cumsum()
 
         dfs.append(chunk)
 

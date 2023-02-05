@@ -2,7 +2,6 @@ import os
 import gc
 import cudf
 import numba
-import numpy as np
 import pandas as pd
 
 from tqdm import tqdm
@@ -28,13 +27,12 @@ def compute_covisitation_matrix(
     chunks = [files[x: x + 10] for x in range(0, len(files), 10)]
 
     matrices = []
-    for part in range(DISK_PIECES): 
+    for part in range(DISK_PIECES):
         for idx, chunk in enumerate(tqdm(chunks)):
             df = cudf.concat(
-                [read_file(file, data_cache) for file in chunk],
-                ignore_index=True
+                [read_file(file, data_cache) for file in chunk], ignore_index=True
             )
-    
+
             if considered_types != [1, 2, 3]:
                 df = df.loc[df["type"].isin(considered_types)]
 
@@ -50,7 +48,7 @@ def compute_covisitation_matrix(
             df = df.loc[  # Less than 1h appart, different ID
                 ((df.ts_x - df.ts_y).abs() < 24 * 60 * 60) & (df.aid_x != df.aid_y)
             ]
-            
+
             # SAVE MEM
             df = df.loc[(df.aid_x >= part * SIZE) & (df.aid_x < (part + 1) * SIZE)]
 
@@ -93,9 +91,9 @@ def compute_covisitation_matrix(
 
         if n:
             matrix = matrix.loc[matrix.n < n].drop("n", axis=1)
-            
+
         matrices.append(matrix.to_pandas())
-    
+
     if save_folder:
         if weighting == "type":
             weighting += "".join(map(str, list(type_weight.values())))
@@ -107,5 +105,6 @@ def compute_covisitation_matrix(
         pd.concat(matrices, ignore_index=True).to_parquet(save_path)
 
     numba.cuda.current_context().deallocations.clear()
+
 
 #     return matrix

@@ -1,16 +1,8 @@
-import gc
-import cudf
-import glob
-import numba
 import warnings
-import numpy as np
-import pandas as pd
 import lightgbm as lgb
-from tqdm import tqdm
 
 from utils.torch import seed_everything
 from utils.metrics import evaluate
-from utils.load import load_parquets_cudf, load_parquets_cudf_folds
 
 warnings.simplefilter(action="ignore", category=UserWarning)
 
@@ -18,7 +10,7 @@ warnings.simplefilter(action="ignore", category=UserWarning)
 def objective_lgbm(
     trial,
     df_train,
-    df_val, 
+    df_val,
     val_regex,
     features=[],
     target="",
@@ -30,7 +22,7 @@ def objective_lgbm(
     fold=0,
     debug=False,
     no_tqdm=False,
-    run=None
+    run=None,
 ):
     # Params
     params_to_tweak = dict(
@@ -45,45 +37,41 @@ def objective_lgbm(
     # Model
     seed_everything(0)
 
-    model = lgb.LGBMClassifier(
-        **params,
-        n_estimators=num_boost_round,
-        random_state=10,
-        metric='auc',
-        n_jobs=20
+    model = lgb.LGBMRanker(
+        **params, n_estimators=num_boost_round, random_state=10, metric="auc", n_jobs=20
     )
 
-#     group_train = df_train[['session', 'candidates']].groupby('session').size().values
-#     group_val = df_val[['session', 'candidates']].groupby('session').size().values
+    group_train = df_train[['session', 'candidates']].groupby('session').size().values
+    group_val = df_val[['session', 'candidates']].groupby('session').size().values
 
     model.fit(
         df_train[features],
         df_train[target],
-#         group=group_train,
+        group=group_train,
         verbose=100,
         early_stopping_rounds=100,
         eval_set=[(df_val[features], df_val[target])],
-#         eval_group=[group_val],
-#         eval_at=[20],
+        eval_group=[group_val],
+        eval_at=[20],
     )
 
     # Eval & verbose
-    cols = ['session', 'candidates', 'gt_clicks', 'gt_carts', 'gt_orders', 'pred']
-    df_val['pred'] = model.predict(df_val[features])
+    cols = ["session", "candidates", "gt_clicks", "gt_carts", "gt_orders", "pred"]
+    df_val["pred"] = model.predict(df_val[features])
     score = evaluate(df_val[[c for c in cols if c in df_val.columns]], target)
-    
+
     if run is not None:
         run[f"fold_{fold}/recall_opt"].log(score)
 
     display_params = {}
     for param, v in params_to_tweak.items():
         if "sample" in param:
-            display_params[param] = f'{v :.3f}'
+            display_params[param] = f"{v :.3f}"
         elif "reg_" in param:
-            display_params[param] = f'{v :.2e}'
+            display_params[param] = f"{v :.2e}"
         else:
             display_params[param] = v
-    print(f'Params : {display_params},\n')
+    print(f"Params : {display_params},\n")
 
     return score
 
@@ -108,31 +96,27 @@ def train_lgbm(
     seed_everything(0)
 
     model = lgb.LGBMClassifier(
-        **params,
-        n_estimators=num_boost_round,
-        random_state=10,
-        metric='auc',
-        n_jobs=20
+        **params, n_estimators=num_boost_round, random_state=10, metric="auc", n_jobs=20
     )
 
-    group_train = df_train[['session', 'candidates']].groupby('session').size().values
-    group_val = df_val[['session', 'candidates']].groupby('session').size().values
+    group_train = df_train[["session", "candidates"]].groupby("session").size().values
+    group_val = df_val[["session", "candidates"]].groupby("session").size().values
 
     model.fit(
         df_train[features],
         df_train[target],
-#         group=group_train,
+        group=group_train,
         verbose=100,
         early_stopping_rounds=100,
         eval_set=[(df_val[features], df_val[target])],
-#         eval_group=[group_val],
-#         eval_at=[20],
+        eval_group=[group_val],
+        eval_at=[20],
     )
 
-    cols = ['session', 'candidates', 'gt_clicks', 'gt_carts', 'gt_orders', 'pred']
-    df_val['pred'] = model.predict(df_val[features])
+    cols = ["session", "candidates", "gt_clicks", "gt_carts", "gt_orders", "pred"]
+    df_val["pred"] = model.predict(df_val[features])
     pred_val = df_val[[c for c in cols if c in df_val.columns]]
 
     evaluate(pred_val, target)
-    
+
     return pred_val, model

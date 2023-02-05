@@ -10,10 +10,10 @@ def load_parquets(regex):
     dfs = []
     for e, chunk_file in enumerate(glob.glob(regex)):
         chunk = pd.read_parquet(chunk_file)
-        
-#         if "ts" in chunk.columns:
+
+        #         if "ts" in chunk.columns:
         chunk.ts = (chunk.ts / 1000).astype("int32")
-#         if "type" in chunk.columns:
+        #         if "type" in chunk.columns:
         chunk["type"] = chunk["type"].map(TYPE_LABELS).astype("int8")
         dfs.append(chunk)
     return pd.concat(dfs).reset_index(drop=True)
@@ -44,8 +44,7 @@ def create_candidates(df, clicks_candids, type_weighted_candids, max_cooc=100):
     df["type_weighted_candidates"] = df["aid"].map(type_weighted_candids)
 
     df["coocurence_candidates"] = (
-        df["clicks_candidates"]
-        + df["type_weighted_candidates"]
+        df["clicks_candidates"] + df["type_weighted_candidates"]
     )
 
     df.drop(["clicks_candidates", "type_weighted_candidates"], axis=1, inplace=True)
@@ -88,7 +87,9 @@ def explode(df, test=False):
             ).fillna(-1)
             df_tgt[col] = df_tgt[col] == df_tgt["candidates"]
             df_tgt = df_tgt.groupby(["session", "candidates"]).max().reset_index()
-            df_tgt = df_tgt.sort_values(["session", "candidates"]).reset_index(drop=True)
+            df_tgt = df_tgt.sort_values(["session", "candidates"]).reset_index(
+                drop=True
+            )
 
             df[col] = df_tgt[col].astype("uint8")
 

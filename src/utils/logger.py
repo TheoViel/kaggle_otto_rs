@@ -1,10 +1,7 @@
 import os
-import re
 import sys
 import json
-import shutil
 import datetime
-import subprocess
 import numpy as np
 import neptune.new as neptune
 
@@ -72,7 +69,7 @@ def prepare_log_folder(log_path):
     for f in os.listdir(log_today):
         try:
             exps.append(int(f))
-        except:
+        except Exception:
             continue
     exp_id = np.max(exps) + 1 if len(exps) else 0
 
@@ -105,7 +102,7 @@ def save_config(config, path):
     with open(path, "w") as f:
         json.dump(dic, f)
 
-        
+
 def init_neptune(config, log_folder):
     print()
     run = neptune.init_run(project=NEPTUNE_PROJECT)

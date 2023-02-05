@@ -73,21 +73,28 @@ def get_coverage(preds, gts):
 
 
 def evaluate(df_val, target, verbose=1):
-    preds = df_val[['session', 'candidates', 'pred']].copy()
-    preds = preds.sort_values(['session', 'pred'], ascending=[True, False])
-    preds = preds[['session', 'candidates', 'pred']].groupby('session').agg(list).reset_index()
+    preds = df_val[["session", "candidates", "pred"]].copy()
+    preds = preds.sort_values(["session", "pred"], ascending=[True, False])
+    preds = (
+        preds[["session", "candidates", "pred"]]
+        .groupby("session")
+        .agg(list)
+        .reset_index()
+    )
     try:
         preds = preds.to_pandas()
-    except:
+    except Exception:
         pass
-    preds['candidates'] = preds['candidates'].apply(lambda x: x[:20])
+    preds["candidates"] = preds["candidates"].apply(lambda x: x[:20])
 
     gt = pd.read_parquet(GT_FILE)
-    preds = preds.merge(gt[gt["type"] == target[3:]].drop("type", axis=1), how="left").rename(
-        columns={"ground_truth": target}
-    )
+    preds = preds.merge(
+        gt[gt["type"] == target[3:]].drop("type", axis=1), how="left"
+    ).rename(columns={"ground_truth": target})
 
-    n_preds, n_gts, n_found = get_coverage(preds["candidates"].values, preds[target].values)
+    n_preds, n_gts, n_found = get_coverage(
+        preds["candidates"].values, preds[target].values
+    )
 
     if verbose:
         print(f"\n-> {target}  -  Recall : {n_found / n_gts :.4f}\n")

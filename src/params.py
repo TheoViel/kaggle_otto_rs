@@ -12,13 +12,8 @@ LOG_PATH = "../logs/"
 
 NUM_WORKERS = 4
 
-N_IDS = 1855610
-CLS_TOKEN = 1855609
-
 TYPE_LABELS = {"clicks": 0, "carts": 1, "orders": 2}
 
-NEPTUNE_PROJECT = "KagglingTheo/Otto-Recommender-System"
-
+NEPTUNE_PROJECT = ""
 
 GT_FILE = "../output/val_labels.parquet"
-# GT_FILE = "../output/val_labels_2.parquet"

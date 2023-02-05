@@ -8,7 +8,6 @@ from typing import List
 from pathlib import Path
 from copy import deepcopy
 from beartype import beartype
-from pandas.io.json._json import JsonReader
 
 from otto_src.labels import ground_truth
 
@@ -28,7 +27,7 @@ def split_events(events: List[dict], split_idx=None, last_2=False):
 
     if not split_idx:
         split_idx = random.randint(1, len(test_events))
-    
+
     test_events = test_events[:split_idx]
     labels = test_events[-1]["labels"]
     for event in test_events:
@@ -38,7 +37,10 @@ def split_events(events: List[dict], split_idx=None, last_2=False):
 
 @beartype
 def create_kaggle_testset(
-    sessions: pd.DataFrame, sessions_output: Path, labels_output: Path, last_2=False,
+    sessions: pd.DataFrame,
+    sessions_output: Path,
+    labels_output: Path,
+    last_2=False,
 ):
     last_labels = []
     splitted_sessions = []
@@ -84,12 +86,7 @@ def get_max_ts(sessions_file: Path) -> int:
 
 
 def train_test_split(
-    session_chunks,
-    train_file,
-    test_file,
-    max_ts,
-    test_days=7,
-    trim=True
+    session_chunks, train_file, test_file, max_ts, test_days=7, trim=True
 ):
     assert (test_file is not None) or (train_file is not None), "Saving nothing !"
 
@@ -99,12 +96,12 @@ def train_test_split(
     if train_file is not None:
         Path(train_file).parent.mkdir(parents=True, exist_ok=True)
         train_file = open(train_file, "w")
-        print(f'- Saving train sessions to {train_file}')
+        print(f"- Saving train sessions to {train_file}")
 
     if test_file is not None:
         Path(test_file).parent.mkdir(parents=True, exist_ok=True)
         test_file = open(test_file, "w")
-        print(f'- Saving test sessions to {test_file}')
+        print(f"- Saving test sessions to {test_file}")
 
     for chunk in tqdm(session_chunks, desc="Splitting sessions"):
         for _, session in chunk.iterrows():
