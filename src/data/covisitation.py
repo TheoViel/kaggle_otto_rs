@@ -5,9 +5,36 @@ import numba
 import pandas as pd
 
 from tqdm import tqdm
+from params import TYPE_LABELS
+
+
+def read_file_to_cache(f):
+    """
+    Reads a parquet file to cache.
+
+    Args:
+        f (str): File to load.
+
+    Returns:
+        pandas DataFrame: Loaded file.
+    """
+    df = pd.read_parquet(f)
+    df.ts = (df.ts / 1000).astype("int32")
+    df["type"] = df["type"].map(TYPE_LABELS).astype("int8")
+    return df
 
 
 def read_file(f, data_cache):
+    """
+    Pandas Dataframe -> cudf Dataframe.
+
+    Args:
+        f (str): File key.
+        data_cache (dict): File cache.
+
+    Returns:
+        cudf DataFrame: File.
+    """
     return cudf.DataFrame(data_cache[f])
 
 
@@ -21,6 +48,19 @@ def compute_covisitation_matrix(
     save_folder="",
     suffix="",
 ):
+    """
+    Computes Theo's covisitation matrices.
+
+    Args:
+        files (list): Filenames.
+        data_cache (dict): Data cache.
+        weighting (str, optional): Weighting type, in "temporal", "type", "". Defaults to "".
+        type_weight (dict, optional): Type weights. Defaults to {}.
+        considered_types (list, optional): Considered types. Defaults to [1, 2, 3].
+        n (int, optional): Number of aids to consider. Defaults to 0.
+        save_folder (str, optional): Folder to save the matrix in. Defaults to "".
+        suffix (str, optional): Save suffix ("test" or "val"). Defaults to "".
+    """
     DISK_PIECES = 4
     SIZE = 1.86e6 / DISK_PIECES
 
@@ -105,6 +145,3 @@ def compute_covisitation_matrix(
         pd.concat(matrices, ignore_index=True).to_parquet(save_path)
 
     numba.cuda.current_context().deallocations.clear()
-
-
-#     return matrix

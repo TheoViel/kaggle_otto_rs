@@ -1,3 +1,5 @@
+# FROM https://github.com/otto-de/recsys-dataset
+
 import json
 import random
 import argparse
@@ -18,12 +20,8 @@ class setEncoder(json.JSONEncoder):
 
 
 @beartype
-def split_events(events: List[dict], split_idx=None, last_2=False):
+def split_events(events: List[dict], split_idx=None):
     test_events = ground_truth(deepcopy(events))
-
-    if last_2:
-        split_idx = len(test_events) - 2
-        split_idx = max(0, split_idx)
 
     if not split_idx:
         split_idx = random.randint(1, len(test_events))
@@ -40,7 +38,6 @@ def create_kaggle_testset(
     sessions: pd.DataFrame,
     sessions_output: Path,
     labels_output: Path,
-    last_2=False,
 ):
     last_labels = []
     splitted_sessions = []
@@ -50,10 +47,8 @@ def create_kaggle_testset(
     ):
         session = session.to_dict()
         try:
-            splitted_events, labels = split_events(session["events"], last_2=last_2)
+            splitted_events, labels = split_events(session["events"])
         except ValueError:
-            #             print(f'Skipping session {session}')
-            #             print()
             continue
         last_labels.append({"session": session["session"], "labels": labels})
         splitted_sessions.append(

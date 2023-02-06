@@ -6,6 +6,16 @@ from params import TYPE_LABELS
 
 
 def df_parallelize_run(func, t_split):
+    """
+    Pool multiprocessing for speedup.
+
+    Args:
+        func (function): Function to parallelize.
+        t_split (list): Files.
+
+    Returns:
+        pandas DataFrame: Results.
+    """
     num_cores = np.min([20, len(t_split)])
     pool = Pool(num_cores)
     df = pool.map(func, t_split)
@@ -15,8 +25,16 @@ def df_parallelize_run(func, t_split):
 
 
 def matrix_to_candids_dict(matrix):
-    matrix = matrix.sort_values(["aid_x", "wgt"], ascending=[True, False])
+    """
+    Converts a matrix to a dict of candidates sorted by weight.
 
+    Args:
+        matrix (cudf or pandas DataFrame): Matrix.
+
+    Returns:
+        dict: {aid: [aid1, aid2, ...], ...}
+    """
+    matrix = matrix.sort_values(["aid_x", "wgt"], ascending=[True, False])
     candids = matrix[["aid_x", "aid_y"]].groupby("aid_x").agg(list)
 
     try:
@@ -31,6 +49,15 @@ def matrix_to_candids_dict(matrix):
 
 
 def load_parquets(regex):
+    """
+    Loads sessions.
+
+    Args:
+        regex (str): Sessions regex
+
+    Returns:
+        cudf DataFrame: Sessions.
+    """
     dfs = []
     for e, chunk_file in enumerate(glob.glob(regex)):
         chunk = cudf.read_parquet(chunk_file)
@@ -51,6 +78,16 @@ def load_parquets(regex):
 
 
 def explode(df, test=False):
+    """
+    Explodes candidates for saving.
+
+    Args:
+        df (cudf DataFrame): Candidates.
+        test (bool, optional): Whether data is test data. Defaults to False.
+
+    Returns:
+         cudf DataFrame: Exploded candidates.
+    """
     if "aid" in df.columns:
         df.drop(["aid", "type"], axis=1, inplace=True)
 

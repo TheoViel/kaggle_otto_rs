@@ -26,15 +26,21 @@ warnings.simplefilter(action="ignore", category=FutureWarning)
 warnings.simplefilter(action="ignore", category=UserWarning)
 
 
-def main(mode="val", gt=False):
+def main(mode="val"):
+    """
+    Main functions for feature engineering.
+
+    Args:
+        mode (str, optional): Mode, in ["val", "test", "extra"]. Defaults to "val".
+
+    Raises:
+        NotImplementedError: Mode not supported.
+    """
     from params import GT_FILE
 
     # Params
     MODE = mode
     CANDIDATES_VERSION = "cv7+-tv5"
-    #     CANDIDATES_VERSION = "cv8-tv5"
-    #     CANDIDATES_VERSION = "cv9-tv5"
-    #     CANDIDATES_VERSION = "clicks_cv3-tv5"
 
     FEATURES_VERSION = "12"
 
@@ -47,11 +53,6 @@ def main(mode="val", gt=False):
     if MODE == "extra":
         GT_FILE = "../output/val_labels_trimmed.parquet"  # noqa
         PARQUET_FILES = "../output/val_trimmed_parquet/*"
-
-    if gt:
-        MODE = "val"
-        CANDIDATE_FILE = "../output/candidates/candidates_gt.parquet"
-        SUFFIX = f"gt.{FEATURES_VERSION}"
 
     print(f"\n -> Generating features {SUFFIX}  -  Mode [{MODE.upper()}]\n\n")
 
@@ -103,9 +104,8 @@ def main(mode="val", gt=False):
     # Chunks
     all_pairs = cudf.read_parquet(CANDIDATE_FILE)
 
-    if (
-        MODE != "test" and "clicks" not in CANDIDATES_VERSION
-    ):  # Remove useless sessions for speed-up
+    # Remove sessions with no carts/orders for speed-up
+    if MODE == "extra":  # or MODE == "val"
         gt = cudf.read_parquet(GT_FILE)
         kept_sessions = gt[gt["type"] != "clicks"].drop("ground_truth", axis=1)
         kept_sessions = kept_sessions.drop_duplicates(subset="session", keep="first")
@@ -391,13 +391,6 @@ def parse_args():
         default="val",
         help="Mode",
     )
-
-    parser.add_argument(
-        "--gt",
-        default=False,
-        action="store_true",
-        help="Generate gt features",
-    )
     return parser.parse_args()
 
 
@@ -405,6 +398,6 @@ if __name__ == "__main__":
     args = parse_args()
 
     assert args.mode in ["val", "test", "extra"]
-    main(args.mode, args.gt)
+    main(args.mode)
 
     print("\n\nDone !")

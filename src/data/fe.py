@@ -11,6 +11,17 @@ from utils.load import load_sessions
 
 
 def compute_weights(sessions, return_sessions=False, no_click=False):
+    """
+    Computes weights to give each aids in the sessions.
+
+    Args:
+        sessions (cudf DataFrame): Sessions.
+        return_sessions (bool, optional): Returns the sessions. Defaults to False.
+        no_click (bool, optional): Exclude clicks from weighting. Defaults to False.
+
+    Returns:
+        cudf DataFrame: Weights.
+    """
     sessions = sessions.sort_values(
         ["session", "ts"], ascending=[True, False]
     ).reset_index(drop=True)
@@ -86,6 +97,17 @@ def compute_weights(sessions, return_sessions=False, no_click=False):
 
 
 def compute_popularity_features(pairs, parquet_files, suffix=""):
+    """
+    Computes popularity features.
+
+    Args:
+        pairs (cudf DataFrame): Candidates.
+        parquet_files (str): Regex to sessions.
+        suffix (str, optional): Suffix for feature name. Defaults to "".
+
+    Returns:
+        cudf DataFrame: Candidates with features
+    """
     sessions = load_sessions(parquet_files)
     sessions = compute_weights(sessions, return_sessions=True)
 
@@ -119,6 +141,17 @@ def compute_popularity_features(pairs, parquet_files, suffix=""):
 
 
 def compute_popularities_new(pairs, sessions, mode="val"):
+    """
+    Computes new popularity features.
+
+    Args:
+        pairs (cudf DataFrame): Candidates.
+        sessions (cudf DataFrame): Sessions.
+        mode (str, optional): Suffix for feature name. Defaults to "val".
+
+    Returns:
+        cudf DataFrame: Candidates with features
+    """
     if mode == "val":
         day_map = {21: 0, 22: 0, 23: 1, 24: 2, 25: 3, 26: 4, 27: 5, 28: 6}  # VAL
     else:
@@ -280,6 +313,17 @@ def compute_popularities_new(pairs, sessions, mode="val"):
 
 
 def compute_coocurence_features(pairs, matrix_file, weights):
+    """
+    Computes features from coocurence / covisitation matrices.
+
+    Args:
+        pairs (cudf DataFrame): Candidates.
+        matrix_file (str): Path to matrix.
+        weights (cudf DataFrame): Weights for aggregation.
+
+    Returns:
+        cudf DataFrame: Candidates with features.
+    """
     pairs["group"] = pairs["session"] // 100000
 
     weights = weights.rename(columns={"candidates": "aid"})
@@ -315,6 +359,16 @@ def compute_coocurence_features(pairs, matrix_file, weights):
 
 
 def count_actions(pairs, sessions):
+    """
+    Actions count features.
+
+    Args:
+        pairs (cudf DataFrame): Candidates.
+        sessions (cudf DataFrame): Sessions.
+
+    Returns:
+        np array: Action count feature.
+    """
     pairs = pairs.merge(sessions[["session", "aid"]], how="left", on="session")
     pairs["group"] = pairs["session"] // 100000
 
@@ -334,6 +388,14 @@ def count_actions(pairs, sessions):
 
 
 def add_rank_feature(pairs, feature):
+    """
+    Adds the groupby rank feature.
+    Implementation can be simplified.
+
+    Args:
+        pairs (cudf DataFrame): Candidates.
+        feature (str): Feature name.
+    """
     df_ft = pairs[["session", "candidates", feature]]
     df_ft = df_ft.sort_values(feature, ascending=False, ignore_index=True)
     df_ft[f"{feature}_rank"] = 1
@@ -347,11 +409,21 @@ def add_rank_feature(pairs, feature):
     df_ft = df_ft.drop(feature, axis=1).sort_values(
         ["session", "candidates"], ignore_index=True
     )
-
     pairs[f"{feature}_rank"] = np.clip(df_ft[f"{feature}_rank"], 0, 255).astype("uint8")
 
 
 def compute_matrix_factorization_features(pairs, embed, weights):
+    """
+    Computes features from matrix factorization embeddings.
+
+    Args:
+        pairs (cudf DataFrame): Candidates.
+        embed (np array): Embeddings.
+        weights (cudf DataFrame): Weights for aggreagtion.
+
+    Returns:
+        cudf DataFrame: Features.
+    """
     pairs["group"] = pairs["session"] // 100000
 
     weights = weights.rename(columns={"candidates": "aid"})
@@ -390,6 +462,15 @@ def compute_matrix_factorization_features(pairs, embed, weights):
 
 
 def benny_weights(df):
+    """
+    Computes Benny's weights.
+
+    Args:
+        df (cudf DataFrame): Sessions.
+
+    Returns:
+        cudf DataFrame: Weights.
+    """
     df_type = cudf.DataFrame(
         {"type": [0, 1, 2], "type_": [1, 2, 3], "type_mp": [0.5, 9, 0.5]}
     )
@@ -422,6 +503,15 @@ def benny_weights(df):
 
 
 def load_embed(embed_file):
+    """
+    Loads and normalizes an embedding matrix.
+
+    Args:
+        embed_file (str): Path to embeddings.
+
+    Returns:
+        np array: Embeddings.
+    """
     if not embed_file.endswith(".npy"):
         emb = pickle.load(open(embed_file, "rb"))
         embed = np.zeros((np.max(list(emb.keys())) + 1, 50), dtype=np.float32)
@@ -436,6 +526,19 @@ def load_embed(embed_file):
 
 
 def compute_w2v_features(pairs, parquet_files, embed, name="w2v"):
+    """
+    Computes Benny's Word2vec features.
+    Also works with other embeddings.
+
+    Args:
+        pairs (cudf DataFrame): Candidates.
+        parquet_files (str): Regex to sessions.
+        embed (np array): Embedding matrix.
+        name (str, optional): Matrix name. Defaults to "w2v".
+
+    Returns:
+        cudf DataFrame: Features.
+    """
     pairs = pairs.sort_values(["session", "candidates"], ignore_index=True)
 
     sessions = load_sessions(parquet_files)
@@ -493,6 +596,15 @@ def compute_w2v_features(pairs, parquet_files, embed, name="w2v"):
 
 
 def save_by_chunks(pairs, folder, part=0, chunk_size=50000):
+    """
+    Saves the computed features by chunk.
+
+    Args:
+        pairs (cudf DataFrame): Features.
+        folder (str): Folder to save into.
+        part (int, optional): Feature part index.. Defaults to 0.
+        chunk_size (int, optional): Chunk size. Defaults to 50000.
+    """
     print(f"-> Saving chunks to {folder}   (part #{part})")
     os.makedirs(folder, exist_ok=True)
 

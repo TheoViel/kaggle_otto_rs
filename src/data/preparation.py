@@ -4,26 +4,16 @@ import pandas as pd
 from tqdm import tqdm
 
 
-def prepare_data(root):
-    df = pd.read_csv(root + "train.csv")
-    df_test = pd.read_csv(root + "test.csv")
-
-    if "processed" not in df["path"][0]:
-        df["path"] = root + "processed/" + df["path"]
-    if "processed" not in df_test["path"][0]:
-        df_test["path"] = root + "processed_test/" + df_test["path"]
-
-        df["fold"] = -1
-    df.loc[df.index[-2000000:], "fold"] = 0
-
-    df_test["fold"] = -1
-
-    return df, df_test
-
-
 def json_to_pq(file, output_path="", name=None, shift_sess=False):
     """
-    https://www.kaggle.com/datasets/columbia2131/otto-chunk-data-inparquet-format
+    Converts json sessions to parquet files.
+    Adapted from https://www.kaggle.com/datasets/columbia2131/otto-chunk-data-inparquet-format
+
+    Args:
+        file (Path): Json file.
+        output_path (str, optional): Subfolder to save to. Defaults to "".
+        name (str, optional): Name of the folder to save in. Defaults to None.
+        shift_sess (bool, optional): Whether to shift sessions id. Defaults to False.
     """
     if name is None:
         name = file.stem.rsplit("_", 2)[0]
@@ -56,7 +46,13 @@ def json_to_pq(file, output_path="", name=None, shift_sess=False):
 
 def json_to_pq_y(file, output_path="", name=None, shift_sess=False):
     """
-    https://www.kaggle.com/datasets/columbia2131/otto-chunk-data-inparquet-format
+    Converts json labels to a parquet file.
+
+    Args:
+        file (PathFile): Json file.
+        output_path (str, optional): Folder to save in. Defaults to "".
+        name (str, optional): Name of the file to save. Defaults to None.
+        shift_sess (bool, optional): Whether to shift sessions id. Defaults to False.
     """
     if name is None:
         name = file.stem

@@ -11,27 +11,33 @@ def predict_batched(
     features,
     folds_file="",
     fold=0,
-    probs_file="",
-    probs_mode="",
-    ranker=False,
     test=False,
     debug=False,
     no_tqdm=False,
     df_val=None,
 ):
+    """
+    Batched predict function for ForestInference models.
+
+    Args:
+        model (ForestInference model): Model.
+        dfs_regex (str): Regex to data.
+        features (list): Features.
+        folds_file (str, optional): Path to folds. Defaults to "".
+        fold (int, optional): Fold. Defaults to 0.
+        test (bool, optional): Whether data is test data. Defaults to False.
+        debug (bool, optional): Whether to use debug mode. Defaults to False.
+        no_tqdm (bool, optional): Whether to disable tqdm. Defaults to False.
+        df_val (pandas DataFrame, optional): Use a preloaded dataframe instead. Defaults to None.
+
+    Returns:
+        cudf DataFrame: Results.
+    """
     print("\n[Infering]")
     cols = ["session", "candidates", "gt_clicks", "gt_carts", "gt_orders", "pred"]
 
     if folds_file:
         folds = cudf.read_csv(folds_file)
-
-    if probs_file:
-        preds = cudf.concat(
-            [cudf.read_parquet(f) for f in glob.glob(probs_file + "df_val_*")],
-            ignore_index=True,
-        )
-        preds["pred_rank"] = preds.groupby("session").rank(ascending=False)["pred"]
-        assert len(preds)
 
     dfs = []
     for path in tqdm(glob.glob(dfs_regex), disable=no_tqdm):
@@ -46,13 +52,6 @@ def predict_batched(
         if folds_file:
             dfg = dfg.merge(folds, on="session", how="left")
             dfg = dfg[dfg["fold"] == fold]
-
-        if probs_file:
-            assert "rank" in probs_mode
-            dfg = dfg.merge(preds, how="left", on=["session", "candidates"])
-            max_rank = int(probs_mode.split("_")[1])
-            dfg = dfg[dfg["pred_rank"] <= max_rank]
-            dfg.drop(["pred", "pred_rank"], axis=1, inplace=True)
 
         dfg = dfg.to_pandas()
         numba.cuda.current_context().deallocations.clear()

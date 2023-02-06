@@ -8,6 +8,16 @@ from utils.torch import seed_everything
 
 
 def load_sessions(regexes):
+    """
+    Loads sessions.
+    Some transformations are applied to save memory.
+
+    Args:
+        regexes (str): Regex to sessions.
+
+    Returns:
+        cudf DataFrame: Sessions
+    """
     dfs = []
 
     if not isinstance(regexes, list):
@@ -36,11 +46,31 @@ def load_parquets_cudf_folds(
     use_gt=False,
     use_gt_for_val=False,
     columns=None,
-    probs_file="",
-    probs_mode="",
     seed=42,
     no_tqdm=False,
 ):
+    """
+    Loads features saved in parquet files.
+    Loading is done on GPU.
+
+    Args:
+        regex (str): Regex to files.
+        folds_file (str, optional): Path to folds. Defaults to "".
+        fold (int, optional): Fold. Defaults to 0.
+        pos_ratio (int, optional): Positive ratio for downsampling negatives. Defaults to 0.
+        target (str, optional): Target name. Defaults to "".
+        val_only (bool, optional): Load only val data. Defaults to False.
+        max_n (int, optional): Max number of chunks to load. Defaults to 0.
+        train_only (bool, optional): Load only train data. Defaults to False.
+        use_gt (bool, optional): Whether to filter sessions without gt. Defaults to False.
+        use_gt_for_val (bool, optional): Whether to filter sessions without gt. Defaults to False.
+        columns (list, optional): Columns to load. Defaults to None.
+        seed (int, optional): Seed. Defaults to 42.
+        no_tqdm (bool, optional): Whether to disable tqdm. Defaults to False.
+
+    Returns:
+        pandas DataFrame: Loaded data.
+    """
     already_filtered = target in regex or "clicks" in target
     if already_filtered:
         assert use_gt and use_gt_for_val
@@ -56,14 +86,6 @@ def load_parquets_cudf_folds(
             GT_FILE = "../output/val_labels.parquet"
         gt = cudf.read_parquet(GT_FILE)
         kept_sessions = gt[gt["type"] == target[3:]].drop("ground_truth", axis=1)
-
-    if probs_file:
-        preds = cudf.concat(
-            [cudf.read_parquet(f) for f in glob.glob(probs_file + "df_val_*")],
-            ignore_index=True,
-        )
-        preds["pred_rank"] = preds.groupby("session").rank(ascending=False)["pred"]
-        assert len(preds)
 
     dfs, dfs_val = [], []
     for idx, file in enumerate(tqdm(files, disable=(max_n > 0 or no_tqdm))):
@@ -83,13 +105,6 @@ def load_parquets_cudf_folds(
                 .reset_index(drop=True)
             )
             filtered = True
-
-        if probs_file:
-            assert "rank" in probs_mode
-            df = df.merge(preds, how="left", on=["session", "candidates"])
-            max_rank = int(probs_mode.split("_")[1])
-            df = df[df["pred_rank"] <= max_rank]
-            df.drop(["pred", "pred_rank"], axis=1, inplace=True)
 
         if not train_only:
             df_val = df[df["fold"] == fold].reset_index(drop=True)

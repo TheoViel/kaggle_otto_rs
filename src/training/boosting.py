@@ -22,11 +22,29 @@ def optimize(
     regex,
     config,
     log_folder,
-    n_trials=100,
+    n_trials=20,
     fold=0,
     debug=False,
     run=None,
 ):
+    """
+    Optimizes a boosting model.
+
+    Args:
+        df_train (pandas or cudf DataFrame): Train data.
+        df_val (pandas or cudf DataFrame): Val data.
+        regex (str): Regex to train/val data.
+        config (Config): Config
+        log_folder (str, optional): Log folder. Defaults to None.
+        n_trials (int, optional): Number of trials. Defaults to 20.
+        fold (int, optional): Fold. Defaults to 0.
+        debug (bool, optional):  Whether to use debug mode. Defaults to False.
+        run (Neptune run, optional): Neptune run for logging. Defaults to None.
+
+    Returns:
+        cudf DataFrame: Val Results,
+        pandas DataFrame: Feature importance.
+    """
     print(f"\n-------------  Optimizing {config.model.upper()} Model  -------------\n")
     seed_everything(config.seed)
 
@@ -45,8 +63,6 @@ def optimize(
         target=config.target,
         params=config.params,
         folds_file=config.folds_file,
-        probs_file=config.probs_file,
-        probs_mode=config.probs_mode,
         fold=fold,
         debug=debug,
         no_tqdm=log_folder is not None,
@@ -60,6 +76,22 @@ def optimize(
 
 
 def train(df_train, df_val, regex, config, log_folder=None, fold=0, debug=False):
+    """
+    Trains a boosting model.
+
+    Args:
+        df_train (pandas or cudf DataFrame): Train data.
+        df_val (pandas or cudf DataFrame): Val data.
+        regex (str): Regex to train/val data.
+        config (Config): Config
+        log_folder (str, optional): Log folder. Defaults to None.
+        fold (int, optional): Fold. Defaults to 0.
+        debug (bool, optional): Whether to use debug mode. Defaults to False.
+
+    Returns:
+        cudf DataFrame: Val Results,
+        pandas DataFrame: Feature importance.
+    """
     print(f"\n-------------  Training {config.model.upper()} Model  -------------\n")
 
     print(f"    -> {numerize(len(df_train))} training candidates")
@@ -73,11 +105,8 @@ def train(df_train, df_val, regex, config, log_folder=None, fold=0, debug=False)
         features=config.features,
         target=config.target,
         params=config.params,
-        use_es=config.use_es,
         num_boost_round=config.num_boost_round,
         folds_file=config.folds_file,
-        probs_file=config.probs_file,
-        probs_mode=config.probs_mode,
         fold=fold,
         debug=debug,
         no_tqdm=log_folder is not None,
@@ -116,6 +145,22 @@ def train(df_train, df_val, regex, config, log_folder=None, fold=0, debug=False)
 
 
 def kfold(regex, test_regex, config, log_folder, debug=False, run=None):
+    """
+    Trains a k-fold boosting model.
+    Uses Optuna for hyperparameter tweaking and ForestInference for faster inference.
+    Only XGBoost is supported.
+
+    Args:
+        regex (str): Regex to train/val data.
+        test_regex (str): Regex to test Data.
+        config (Config): Config.
+        log_folder (str): Folder to log results in.
+        debug (bool, optional): Wheter to use debug mode. Defaults to False.
+        run (Neptune run, optional): Neptune run for logging. Defaults to None.
+
+    Returns:
+        pandas DataFrame: Feature importance.
+    """
     seed_everything(config.seed)
     ft_imps, scores = [], []
 
@@ -160,23 +205,6 @@ def kfold(regex, test_regex, config, log_folder, debug=False, run=None):
                 df_extra = df_extra.sample(int(config.extra_prop * len(df_train)))
             print(f"Using {len(df_extra)} extra samples")
             df_train = pd.concat([df_train, df_extra], ignore_index=True)
-
-        if config.model == "lgbm":
-            df_train["has_gt"] = df_train.groupby("session")[config.target].transform(
-                "max"
-            )
-            df_train = (
-                df_train[df_train["has_gt"] == 1]
-                .drop("has_gt", axis=1)
-                .reset_index(drop=True)
-            )
-
-            assert len(df_val["session"].unique()) == len(
-                df_val[df_val["session"] != df_val["session"].shift(1).fillna("")]
-            )
-            assert len(df_train["session"].unique()) == len(
-                df_train[df_train["session"] != df_train["session"].shift(1).fillna("")]
-            )
 
         if fold in config.folds_optimize:
             study = optimize(
@@ -223,16 +251,10 @@ def kfold(regex, test_regex, config, log_folder, debug=False, run=None):
         numba.cuda.current_context().deallocations.clear()
         gc.collect()
 
-        if config.model == "xgb":
-            model = cuml.ForestInference.load(
-                filename=log_folder + f"xgb_{fold}.json",
-                model_type="xgboost_json",
-            )
-        else:
-            model = cuml.ForestInference.load(
-                filename=log_folder + f"lgbm_{fold}.txt",
-                model_type="lightgbm",
-            )
+        model = cuml.ForestInference.load(
+            filename=log_folder + f"xgb_{fold}.json",
+            model_type="xgboost_json",
+        )
 
         if len(glob.glob(test_regex)):
             df_test = predict_batched(
@@ -240,9 +262,6 @@ def kfold(regex, test_regex, config, log_folder, debug=False, run=None):
                 test_regex,
                 config.features,
                 debug=debug,
-                probs_file=config.probs_file if config.restrict_all else "",
-                probs_mode=config.probs_mode if config.restrict_all else "",
-                ranker=("rank" in config.params.get("objective", "")),
                 no_tqdm=True,
             )
             print("\n -> Saving test predictions \n")

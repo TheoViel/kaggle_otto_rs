@@ -7,13 +7,19 @@ from params import TYPE_LABELS
 
 
 def load_parquets(regex):
+    """
+    Loads sessions.
+
+    Args:
+        regex (str): Sessions regex
+
+    Returns:
+        cudf DataFrame: Sessions.
+    """
     dfs = []
     for e, chunk_file in enumerate(glob.glob(regex)):
         chunk = pd.read_parquet(chunk_file)
-
-        #         if "ts" in chunk.columns:
         chunk.ts = (chunk.ts / 1000).astype("int32")
-        #         if "type" in chunk.columns:
         chunk["type"] = chunk["type"].map(TYPE_LABELS).astype("int8")
         dfs.append(chunk)
     return pd.concat(dfs).reset_index(drop=True)
@@ -40,6 +46,19 @@ def matrix_to_candids_dict(matrix):
 
 
 def create_candidates(df, clicks_candids, type_weighted_candids, max_cooc=100):
+    """
+    Theo's algorithm to create candidates from covisitation matrices.
+    It uses the top max_cooc ids in the sum of 2 matrices and all the ids in the session
+
+    Args:
+        df (cudf DataFrame): Sessions.
+        clicks_candids (Candidates): Clicks candidates matrix.
+        type_weighted_candids (Candidates): Type weighted candidates matrix.
+        max_cooc (int, optional): Maximum coocurence. Defaults to 100.
+
+    Returns:
+        pd DataFrame: Candidates.
+    """
     df["clicks_candidates"] = df["aid"].map(clicks_candids)
     df["type_weighted_candidates"] = df["aid"].map(type_weighted_candids)
 
@@ -69,6 +88,16 @@ def create_candidates(df, clicks_candids, type_weighted_candids, max_cooc=100):
 
 
 def explode(df, test=False):
+    """
+    Explodes candidates for saving.
+
+    Args:
+        df (cudf DataFrame): Candidates.
+        test (bool, optional): Whether data is test data. Defaults to False.
+
+    Returns:
+         cudf DataFrame: Exploded candidates.
+    """
     if "aid" in df.columns:
         df.drop(["aid", "type"], axis=1, inplace=True)
 

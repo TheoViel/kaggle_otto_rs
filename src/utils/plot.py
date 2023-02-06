@@ -4,6 +4,13 @@ import matplotlib.pyplot as plt
 
 
 def plot_importances(imps, run=None):
+    """
+    Plots feature importance. Plot can be saved to neptune.
+
+    Args:
+        imps (pandas DataFrame): Features importance.
+        run (neptune run, optional): Neptune run. Defaults to None.
+    """
     imps.index.name = "index"
     importances = imps.rename(columns={0: "importance", "0": "importance"})
 

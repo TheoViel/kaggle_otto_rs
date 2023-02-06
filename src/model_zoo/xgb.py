@@ -10,13 +10,16 @@ from utils.load import load_parquets_cudf_folds
 
 
 class IterLoadForDMatrix(xgb.core.DataIter):
+    """
+    Loader for optimized memory use by Chris Deotte.
+    """
     def __init__(
         self, df=None, features=None, target=None, batch_size=256 * 1024, ranker=False
     ):
         self.features = features
         self.target = target
         self.df = df
-        self.it = 0  # set iterator to 0
+        self.it = 0
         self.batch_size = batch_size
         self.batches = int(np.ceil(len(df) / self.batch_size))
         self.ranker = ranker
@@ -61,13 +64,32 @@ def objective_xgb(
     params=None,
     num_boost_round=10000,
     folds_file="",
-    probs_file="",
-    probs_mode="",
     fold=0,
     debug=False,
     no_tqdm=False,
     run=None,
 ):
+    """
+    Optimizes an XGBoost Classifier.
+
+    Args:
+        trial (optuna trial): Optuna trial.
+        df_train (cudf or pandas DataFrame): Train data.
+        df_val (cudf or pandas DataFrame): Val data.
+        val_regex (str): Regex to val data. Only used if df_val is None.
+        features (list, optional): Features. Defaults to [].
+        target (str, optional): _description_. Defaults to "".
+        params (dict, optional): Boosting parameters. Defaults to None.
+        num_boost_round (int, optional): Number of boosting rounds. Defaults to 10000.
+        folds_file (str, optional): Path to folds. Defaults to "".
+        fold (int, optional): Fold. Defaults to 0.
+        debug (bool, optional): Whether to use debug mode. Defaults to False.
+        no_tqdm (bool, optional): Whether to disable tqdm. Defaults to False.
+        run (Neptune run, optional): Run for logging. Defaults to None.
+
+    Returns:
+        float: Recall@20
+    """
     # Data
     seed_everything(0)
 
@@ -83,16 +105,10 @@ def objective_xgb(
             fold=fold,
             max_n=1 if debug else 10,
             val_only=True,
-            probs_file=probs_file,
-            probs_mode=probs_mode,
             columns=["session", "candidates", "gt_clicks", "gt_carts", "gt_orders"]
             + features,
         )
-    #     if "rank" in params["objective"]:
-    #         df_val = df_val.sort_values('session', ignore_index=True)
-    #         group = df_val[['session', 'candidates']].groupby('session').size().values
-    #         dval = xgb.DMatrix(data=df_val[features], label=df_val[target], group=group)
-    #     else:
+
     dval = xgb.DMatrix(data=df_val[features], label=df_val[target])
 
     del df_train
@@ -153,16 +169,32 @@ def train_xgb(
     features=[],
     target="",
     params=None,
-    cat_features=[],  # TODO
-    use_es=0,
     num_boost_round=10000,
     folds_file="",
-    probs_file="",
-    probs_mode="",
     fold=0,
     debug=False,
     no_tqdm=False,
 ):
+    """
+    Trains an XGBoost Classifier.
+
+    Args:
+        df_train (cudf or pandas DataFrame): Train data.
+        df_val (cudf or pandas DataFrame): Val data.
+        val_regex (str): Regex to val data. Only used if df_val is None.
+        features (list, optional): Features. Defaults to [].
+        target (str, optional): _description_. Defaults to "".
+        params (dict, optional): Boosting parameters. Defaults to None.
+        num_boost_round (int, optional): Number of boosting rounds. Defaults to 10000.
+        folds_file (str, optional): Path to folds. Defaults to "".
+        fold (int, optional): Fold. Defaults to 0.
+        debug (bool, optional): Whether to use debug mode. Defaults to False.
+        no_tqdm (bool, optional): Whether to disable tqdm. Defaults to False.
+
+    Returns:
+        cudf DataFrame: Results.
+        xgb model : Model.
+    """
     seed_everything(0)
 
     iter_train = IterLoadForDMatrix(
@@ -177,16 +209,10 @@ def train_xgb(
             fold=fold,
             max_n=1 if debug else 10,
             val_only=True,
-            probs_file=probs_file,
-            probs_mode=probs_mode,
             columns=["session", "candidates", "gt_clicks", "gt_carts", "gt_orders"]
             + features,
         )
-    #     if "rank" in params["objective"]:
-    #         df_val = df_val.sort_values('session', ignore_index=True)
-    #         group = df_val[['session', 'candidates']].groupby('session').size().values
-    #         dval = xgb.DMatrix(data=df_val[features], label=df_val[target], group=group)
-    #     else:
+
     dval = xgb.DMatrix(data=df_val[features], label=df_val[target])
 
     del df_train
@@ -198,10 +224,10 @@ def train_xgb(
     model = xgb.train(
         params,
         dtrain=dtrain,
-        evals=[(dval, "val")] if use_es else None,
+        evals=[(dval, "val")],
         num_boost_round=num_boost_round,
-        early_stopping_rounds=100 if use_es else None,
-        verbose_eval=100 if use_es else None,
+        early_stopping_rounds=100,
+        verbose_eval=100,
     )
 
     del dtrain, iter_train

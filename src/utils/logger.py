@@ -12,7 +12,6 @@ class Config:
     """
     Placeholder to load a config from a saved json
     """
-
     def __init__(self, dic):
         for k, v in dic.items():
             setattr(self, k, v)
@@ -22,7 +21,6 @@ class Logger(object):
     """
     Simple logger that saves what is printed in a file
     """
-
     def __init__(self, *files):
         self.files = files
 
@@ -39,6 +37,7 @@ class Logger(object):
 def create_logger(directory="", name="logs.txt"):
     """
     Creates a logger to log output in a chosen file
+
     Args:
         directory (str, optional): Path to save logs at. Defaults to "".
         name (str, optional): Name of the file to save the logs in. Defaults to "logs.txt".
@@ -54,8 +53,10 @@ def prepare_log_folder(log_path):
     """
     Creates the directory for logging.
     Logs will be saved at log_path/date_of_day/exp_id
+
     Args:
         log_path (str): Directory
+
     Returns:
         str: Path to the created log folder
     """
@@ -84,9 +85,11 @@ def prepare_log_folder(log_path):
 def save_config(config, path):
     """
     Saves a config as a json and pandas dataframe.
+
     Args:
         config (Config): Config.
         path (str): Path to save at.
+
     Returns:
         pandas dataframe: Config as a dataframe.
     """
@@ -104,6 +107,16 @@ def save_config(config, path):
 
 
 def init_neptune(config, log_folder):
+    """
+    Initializes a neptune run
+
+    Args:
+        config (Config): Config.
+        log_folder (str): Log folder.
+
+    Returns:
+        neptune run: Run.
+    """
     print()
     run = neptune.init_run(project=NEPTUNE_PROJECT)
 

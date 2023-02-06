@@ -11,6 +11,16 @@ from inference.predict import predict_batched
 
 
 def inference(regex, test_regex, log_folder, debug=False, save=True):
+    """
+    Inference function for boosting models.
+
+    Args:
+        regex (str): Regex to validation data.
+        test_regex (str): Regex to test data.
+        log_folder (str): Log folder.
+        debug (bool, optional): Whether to use debug mode. Defaults to False.
+        save (bool, optional): Whether to save predictions. Defaults to True.
+    """
     config = Config(json.load(open(log_folder + "config.json", "r")))
 
     dfs_val = []
@@ -44,9 +54,6 @@ def inference(regex, test_regex, log_folder, debug=False, save=True):
                 config.features,
                 folds_file=config.folds_file,
                 fold=fold,
-                probs_file=config.probs_file if config.restrict_all else "",
-                probs_mode=config.probs_mode if config.restrict_all else "",
-                ranker=("rank" in config.params["objective"]),
                 debug=debug,
             )
 
@@ -74,9 +81,6 @@ def inference(regex, test_regex, log_folder, debug=False, save=True):
                 model,
                 test_regex,
                 config.features,
-                probs_file=config.probs_file if config.restrict_all else "",
-                probs_mode=config.probs_mode if config.restrict_all else "",
-                ranker=("rank" in config.params["objective"]),
                 debug=debug,
             )
 
