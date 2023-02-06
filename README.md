@@ -1,9 +1,10 @@
 # 3rd place solution to the OTTO – Multi-Objective Recommender System Kaggle Competition - Theo's Part
 
 #### Status :
-- Document code : Done
-- Clean notebooks : Approximately done
-- Make ReadMe : Done
+- Document code : Done ✅
+- Clean notebooks : Done ✅
+- Make ReadMe : Done ✅
+- Rerun full pipeline to make sure everything works : To do 📝
 
 
 ## Introduction - Adapted from ([kaggle](https://www.kaggle.com/competitions/otto-recommender-system/discussion/382975))
@@ -60,7 +61,7 @@ Pipeline should run fine in a machine with a 32GB.
 - Create candidates matrices using `3-Candidates.ipynb`. Notebooks have to be run with `MODE="val"`, `MODE="test"` and `MODE="extra"`.
 - Create embeddings matrices using `4-Matrix_Factorization.ipynb`, `4-Seq2Seq_Giba.ipynb` and `4-Word2Vec.ipynb`. Notebooks have to be run with `MODE="val"` and `MODE="test"`
 - Create features using the `fe_main.py` script in the `src` folder. Use `python fe_main.py --mode MODE` with modes `val`, `test` and `extra`.
-- Train an XGBoost model using `6-XGB.ipynb`
+- Train an XGBoost model using `6-XGB.ipynb`. You need to train a models with the 3 targets, the main parameter to tweak is `POS_RATIO`.
 - Evaluate your ensembles and generate submission files using `7-Blend.ipynb`
 
 ## Code structure
