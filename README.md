@@ -64,6 +64,14 @@ Pipeline should run fine in a machine with a 32GB.
 - Train an XGBoost model using `6-XGB.ipynb`. You need to train a models with the 3 targets, the main parameter to tweak is `POS_RATIO`.
 - Evaluate your ensembles and generate submission files using `7-Blend.ipynb`
 
+
+If you run into memory issues :
+- For matrix computation, increase the `PIECES` values.
+- For candidates, Chris' candidates use a lot of ram but you can refactor the code to work by chunk (not implemented).
+- For feature engineering, reduce `CHUNK_SIZE`.
+- For training, validation data can be downsampled. I already downsample it for carts and clicks in the `utils/load/load_parquets_cudf_folds` function but you can downsample more.
+
+
 ## Code structure
 
 If you wish to dive into the code, the repository naming should be straight-forward. Each function is documented.
