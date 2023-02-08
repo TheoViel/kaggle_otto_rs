@@ -1,4 +1,4 @@
-# 3rd place solution to the OTTO – Multi-Objective Recommender System Kaggle Competition - Theo's Part
+# 4th place solution to the OTTO – Multi-Objective Recommender System Kaggle Competition - Theo's Part
 
 #### Status :
 - Document code : Done ✅
@@ -13,7 +13,7 @@ The pipeline follows the classical candidates extraction & reranker scheme.
 
 - CV = 0.5917 - [0.5621, 0.4438, 0.6706] -> LB 0.6028
 
-Clicks is single model, I blend a few XGBs for carts & orders but the boost is small. Blending with models from my teammates gave our Public 0.60437 (3rd) / Private 0.60382 (3rd) LB !
+Clicks is single model, I blend a few XGBs for carts & orders but the boost is small. Blending with models from my teammates gave our Public 0.60437 / Private 0.60382 LB !
 
 ### Candidates
 
