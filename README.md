@@ -1,4 +1,4 @@
-# 4th place solution to the OTTO – Multi-Objective Recommender System Kaggle Competition - Theo's Part
+# 3rd place solution to the OTTO – Multi-Objective Recommender System Kaggle Competition - Theo's Part
 
 #### Status :
 - Document code : Done ✅
