@@ -7,7 +7,7 @@
 - Rerun full pipeline to make sure everything works : To do 📝
 
 
-## Introduction - Adapted from ([kaggle](https://www.kaggle.com/competitions/otto-recommender-system/discussion/382975))
+## Introduction - Adapted from [kaggle](https://www.kaggle.com/competitions/otto-recommender-system/discussion/382975)
 
 The pipeline follows the classical candidates extraction & reranker scheme.
 
